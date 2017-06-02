@@ -419,7 +419,7 @@ function addon:PLAYER_LOGIN()
 		local skillInfo = self:GetSkillInfo(msg)
 		--self:print('spellName: '..spellName..', slot: '..slot..', flags: '..flags..', onSelf: '..tostring(onSelf))
 		if skillInfo and skillInfo.useHook then
-			self:print('[SpellWatcher] updating '..msg, 1)
+			self:print('[SpellWatcher|ByName] updating '..msg, 1)
 			self.SpellWatcher.spells[msg] = { t = GetTime() }
 		end
 		self.CastSpellByName(msg)
@@ -442,7 +442,7 @@ function addon:PLAYER_LOGIN()
 			local skillInfo = self:GetSkillInfo(spellName)
 			--self:print('spellName: '..spellName..', slot: '..slot..', flags: '..flags..', onSelf: '..tostring(onSelf))
 			if skillInfo and skillInfo.useHook then
-				self:print('[SpellWatcher] updating '..spellName, 1)
+				self:print('[SpellWatcher|Slot] updating '..spellName, 1)
 				self.SpellWatcher.spells[spellName] = { t = GetTime() }
 			end
 		end
@@ -579,7 +579,7 @@ function addon:CreateTracker(name, class)
 		
 		local tracker_current, tracker_previous, tracker_next
 		
-		self:print('[Up] '..id..' => '..id_previous)
+		self:print('[Up] '..id..' => '..id_previous, 1)
 		
 		for name, tracker in pairs(self.main_frame.trackers) do
 			if tracker.sortIndex == id_next then
@@ -634,7 +634,7 @@ function addon:CreateTracker(name, class)
 		
 		local tracker_current, tracker_previous, tracker_next
 		
-		self:print('[Down] '..id..' => '..id_next)
+		self:print('[Down] '..id..' => '..id_next, 1)
 		
 		for name, tracker in pairs(self.main_frame.trackers) do
 			if tracker.sortIndex == id_next then
@@ -822,30 +822,30 @@ function addon:HandlePlayerChange()
 			return a.text:GetText() < b.text:GetText()
 		end)
 		
-		self:print('adjusting frames position')
+		self:print('adjusting frames position', 1)
 		for i=1, self.main_frame.trackersCount do
 			unsorted[i].button_up:Enable()
 			unsorted[i].button_down:Enable()
 			if i == 1 then
-				self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()))
+				self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
 				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT)
 				unsorted[i].button_up:Disable()
 			elseif i == self.main_frame.trackersCount then
-				self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount))
+				self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount), 1)
 				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((self.main_frame.trackersCount-1)*BAR_HEIGHT))
 				unsorted[i].button_down:Disable()
 			elseif self.main_frame.trackersCount == 1 then
-				self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()))
+				self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
 				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT)
 				unsorted[i].button_up:Disable()
 				unsorted[i].button_down:Disable()
 			else
-				self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()))
+				self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
 				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((i-1)*BAR_HEIGHT))
 			end
 			unsorted[i].sortIndex = i
 			unsorted[i]:Show()
-			self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()))
+			self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 1)
 		end
 		
 		self:RegisterCombatEvents()
