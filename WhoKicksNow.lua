@@ -87,9 +87,12 @@ function addon:UnregisterCombatEvents()
 	self.SpellWatcher:UnregisterEvent('SPELLCAST_STOP')
 end
 
-function addon:GetSkillInfo(skill)
+function addon:GetSkillInfo(skill, rank)
 	if not skill then
 		return
+	end
+	if not rank then
+		skill = gsub(skill, '%(.+%)', '')
 	end
 	for i=1, getn(SKILLS) do
 		if SKILLS[i].name == skill then
@@ -412,12 +415,19 @@ function addon:PLAYER_LOGIN()
 	
 	-- hooks
 	self.CastSpellByName = CastSpellByName
-	--self.CastSpell = CastSpell
+	self.CastSpell = CastSpell
 	self.UseAction = UseAction
+	self.RunMacro = RunMacro
+	
+	function RunMacro(arg)
+		self:print('[SpellWatcher|Macro] '..arg, 2)
+		self.RunMacro(arg)
+	end
 	
 	function CastSpellByName(msg)
 		local skillInfo = self:GetSkillInfo(msg)
 		--self:print('spellName: '..spellName..', slot: '..slot..', flags: '..flags..', onSelf: '..tostring(onSelf))
+		self:print('[SpellWatcher|ByName] '..msg, 2)
 		if skillInfo and skillInfo.useHook then
 			self:print('[SpellWatcher|ByName] updating '..msg, 1)
 			self.SpellWatcher.spells[msg] = { t = GetTime() }
@@ -425,10 +435,10 @@ function addon:PLAYER_LOGIN()
 		self.CastSpellByName(msg)
 	end
 	
-	--[[function CastSpell(id, bookType)
-		self:print(id..', type: '..bookType)
+	function CastSpell(id, bookType)
+		self:print('[SpellWatcher|id] '..id..', bookType: '..bookType, 1)
 		self.CastSpell(id, bookType)
-	end]] -- people dont clikc skills from book, right? RIGHT!?
+	end
 	
 	self.UseActionTooltip = CreateFrame('GameTooltip', 'WKNTooltip', UIParent, 'GameTooltipTemplate')
 	self.UseActionTooltip:SetOwner(UIParent, 'ANCHOR_NONE')
@@ -441,6 +451,7 @@ function addon:PLAYER_LOGIN()
 			local spellName = self.UseActionTooltipText:GetText()
 			local skillInfo = self:GetSkillInfo(spellName)
 			--self:print('spellName: '..spellName..', slot: '..slot..', flags: '..flags..', onSelf: '..tostring(onSelf))
+			self:print('[UseAction]  '..spellName, 1)
 			if skillInfo and skillInfo.useHook then
 				self:print('[SpellWatcher|Slot] updating '..spellName, 1)
 				self.SpellWatcher.spells[spellName] = { t = GetTime() }
