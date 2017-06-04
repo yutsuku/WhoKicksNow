@@ -10,7 +10,7 @@ Create AddOns folder if necessary
 
 After Installation directory tree should look like the following
 
-```
+'''
 World of Warcraft
   `- Interface
      `- AddOns
@@ -28,7 +28,7 @@ World of Warcraft
 		      |- padlock-locked-pushed.blp
 		      |- padlock-open.blp
 		      `- padlock-pushed.blp
-```
+'''
 
 Features:
 - Displays cooldowns for Kick and Gouge abilities for everyone from your 
