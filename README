@@ -1,8 +1,6 @@
 Who Kicks Now? - a World of Warcraft (1.12.1) AddOn
 ===================================================
 
-![Picture of Who Kicks Now?](docs/img/preview.png?raw=true "Title")
-
 Installation:
 
 Put "WhoKicksNow" folder into ".../World of Warcraft/Interface/AddOns/".
@@ -19,15 +17,15 @@ World of Warcraft
            |- WhoKicksNow.lua
            |- WhoKicksNow.toc
            `- textures
-		      |- padlock.psd
-		      |- padlock-disabled.blp
-		      |- padlock-highlight.blp
-		      |- padlock-locked.blp
-		      |- padlock-locked-disabled.blp
-		      |- padlock-locked-highlight.blp
-		      |- padlock-locked-pushed.blp
-		      |- padlock-open.blp
-		      `- padlock-pushed.blp
+              |- padlock.psd
+              |- padlock-disabled.blp
+              |- padlock-highlight.blp
+              |- padlock-locked.blp
+              |- padlock-locked-disabled.blp
+              |- padlock-locked-highlight.blp
+              |- padlock-locked-pushed.blp
+              |- padlock-open.blp
+              `- padlock-pushed.blp
 '''
 
 Features:
