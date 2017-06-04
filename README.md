@@ -36,6 +36,9 @@ Features:
 - Displays cooldowns for Cheap Shot and Kidney Shot abilities for everyone
   from your group who has this AddOn installed and running.
 
+Commands:
+- "/wk", "/whokicksnow" - enables or disables the AddOn
+
 Known Issues:
 - Doesn't make Thistle Tea, unfortunetly.
 
