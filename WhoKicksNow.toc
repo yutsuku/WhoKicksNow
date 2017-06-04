@@ -2,5 +2,6 @@
 ## Title: WhoKicksNow
 ## Author: moh
 ## Version: 1.0
+## SavedVariablesPerCharacter: WhoKicksNowOptions
 
 WhoKicksNow.lua

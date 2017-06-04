@@ -11,9 +11,10 @@ local UnitName = UnitName
 local UnitClass = UnitClass
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
 
-local MAINBAR_WIDTH = 140
+local MAINBAR_WIDTH = 150
 local MAINBAR_HEIGHT = 30
-local BAR_WIDTH = 140
+local BAR_WIDTH = 110
+local BAR_WIDTH_LOCKED = 150
 local BAR_HEIGHT = 20
 local BAR_HEIGHT_MAIN = 30
 local COOLDOWN_WIDTH = 200
@@ -43,10 +44,7 @@ local SKILLS = {
 	{name='Gouge', cooldown=10, texture=[[Interface\Icons\Ability_Gouge]]},
 }
 
-local SPELLBOOK = {}
-
---addon:RegisterEvent('ADDON_LOADED')
-addon:RegisterEvent('PLAYER_LOGIN')
+addon:RegisterEvent('ADDON_LOADED')
 addon:RegisterEvent('PARTY_MEMBERS_CHANGED')
 addon:RegisterEvent('RAID_ROSTER_UPDATE')
 
@@ -60,19 +58,6 @@ function addon:RegisterCombatEvents()
 		addon:RegisterEvent('CHAT_MSG_ADDON')
 	end
 	self.SpellWatcher:RegisterEvent('SPELLCAST_STOP')
-	
-	-- looks like CS needs a hook for spell cast function
-	--addon:RegisterEvent('SPELLCAST_STOP')
-	--addon:RegisterEvent('CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE')
-	-- "Fire Roc is afflicted by Cheap Shot."
-	
-	--addon:RegisterEvent('CHAT_MSG_SPELL_SELF_DAMAGE')
-	-- "Your Gouge crits Fire Roc for 124."
-	
-	-- looks like KS needs a hook for spell cast function
-	--addon:RegisterEvent('SPELLCAST_STOP')
-	--addon:RegisterEvent('CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE')
-	-- "Blisterpaw Hyena is afflicted by Kidney Shot"
 end
 
 function addon:UnregisterCombatEvents()
@@ -98,6 +83,56 @@ function addon:GetSkillInfo(skill, rank)
 		if SKILLS[i].name == skill then
 			return SKILLS[i]
 		end
+	end
+end
+
+function addon:GetAnchorPoint()
+	local UI_Width, UI_Height, width, height, top, right, bottom, left
+	
+	UI_Width = UIParent:GetWidth()
+	UI_Height = UIParent:GetHeight()
+	width = self.main_frame:GetWidth()
+	height = self.main_frame:GetHeight()
+	top = self.main_frame:GetTop()
+	right = self.main_frame:GetRight()
+	bottom = self.main_frame:GetBottom()
+	left = self.main_frame:GetLeft()
+	
+	self:print(format('UI: %f x %f', UIParent:GetWidth(), UIParent:GetHeight() ), 1)
+	self:print(format('bottom: %f, left: %f, right: %f, top: %f', bottom, left, right, top ), 1)
+	
+	local is_top, is_right, is_bottom, is_left
+	
+	if left + width/2 < UI_Width/2 then
+		is_left = true
+	end
+	if right + width/2 > UI_Width/2 then
+		right =  -(UI_Width-right)
+		is_right = true
+	end
+	if top + height/2 > UI_Height/2 then
+		top = -(UI_Height-top)
+		is_top = true
+	end
+	if bottom + height/2 < UI_Height/2 then
+		is_bottom = true
+	end
+	
+	if is_top and is_left then
+		self:print(format('Region is TOPLEFT %f, %f', left, top), 1)
+		return 'TOPLEFT', left, top
+	elseif is_top and is_right then
+		self:print(format('Region is TOPRIGHT %f, %f', right, top), 1)
+		return 'TOPRIGHT', right, top
+	elseif is_bottom and is_left then
+		self:print(format('Region is BOTTOMLEFT %f, %f', left, bottom), 1)
+		return 'BOTTOMLEFT', left, bottom
+	elseif is_bottom and is_right then
+		self:print(format('Region is BOTTOMRIGHT %f, %f', right, bottom), 1)
+		return 'BOTTOMRIGHT', right, bottom
+	else
+		self:print('Unable to assume region', 1)
+		return 'CENTER', 0, 0
 	end
 end
 
@@ -248,14 +283,6 @@ function addon:CHAT_MSG_SPELL_SELF_DAMAGE()
 	table.insert(self.main_frame.trackers[UnitName('player')].cooldowns.t, obj)
 	self.main_frame.trackers[UnitName('player')].cooldowns:Show()
 	self:print('[SELF_DAMAGE] Showing cooldowns for you due to '..skill, 1)
-	--[[self.main_frame.trackers[UnitName('player')].cooldowns.t
-	
-	this.cooldowns.t = {
-		{name='Kidney Shot', remaining=20, cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
-		{name='Kick', remaining=10, miss=true, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
-	}
-	this.cooldowns:Show()
-	self:print('Test mode for '..this.text:GetText())]]
 end
 
 function addon:CHAT_MSG_SPELL_PARTY_DAMAGE()
@@ -301,42 +328,28 @@ function addon:CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE() -- fucking raid groups, ca
 end
 -- end of important combat events
 
+function addon:ResetConfig()
+	WhoKicksNowOptions = {}
+	WhoKicksNowOptions.point = 'CENTER'
+	WhoKicksNowOptions.x = 0
+	WhoKicksNowOptions.y = 0
+	WhoKicksNowOptions.enabled = true
+	WhoKicksNowOptions.locked = false
+end
+
 function addon:ADDON_LOADED()
 	if arg1 ~= 'WhoKicksNow' then
 		return
 	end
-end
-
-function addon:RAID_ROSTER_UPDATE()
-	self:print('RAID_ROSTER_UPDATE', 1)
-	self:HandlePlayerChange()
-end
-
-function addon:PARTY_MEMBERS_CHANGED()
-	self:print('PARTY_MEMBERS_CHANGED', 1)
-	self:HandlePlayerChange()
-end
-
-function addon:PLAYER_LOGIN()
-
-	--[[local i = 1
-	while true do
-	local spellName, spellRank = GetSpellName(i, BOOKTYPE_SPELL)
-	if not spellName then
-		do break end
+	if not WhoKicksNowOptions then
+		self:ResetConfig()
+		self:print('config created')
 	end
-
-	-- use spellName and spellRank here
-	DEFAULT_CHAT_FRAME:AddMessage( spellName .. '(' .. spellRank .. ')' )
-
-	i = i + 1
-	end]]
+	self:print('loaded')
 	
-	if debug_level > 0 then
-		WKN = self
-	end
 	self.groupMembers = {}
-	self.enabled = true
+	self.locked = WhoKicksNowOptions.locked
+	self.enabled = WhoKicksNowOptions.enabled
 	self.inGroup = false
 	self.version = GetAddOnMetadata('WhoKicksNow', 'Version')
 	
@@ -410,7 +423,6 @@ function addon:PLAYER_LOGIN()
 		end
 	end)
 	
-	--self.SpellWatcher:RegisterEvent('SPELLCAST_STOP')
 	self.SpellWatcher.spells = {}
 	
 	-- hooks
@@ -426,7 +438,6 @@ function addon:PLAYER_LOGIN()
 	
 	function CastSpellByName(msg)
 		local skillInfo = self:GetSkillInfo(msg)
-		--self:print('spellName: '..spellName..', slot: '..slot..', flags: '..flags..', onSelf: '..tostring(onSelf))
 		self:print('[SpellWatcher|ByName] '..msg, 2)
 		if skillInfo and skillInfo.useHook then
 			self:print('[SpellWatcher|ByName] updating '..msg, 1)
@@ -450,8 +461,7 @@ function addon:PLAYER_LOGIN()
 			self.UseActionTooltip:SetAction(slot)
 			local spellName = self.UseActionTooltipText:GetText()
 			local skillInfo = self:GetSkillInfo(spellName)
-			--self:print('spellName: '..spellName..', slot: '..slot..', flags: '..flags..', onSelf: '..tostring(onSelf))
-			self:print('[UseAction]  '..spellName, 1)
+			self:print('[UseAction]  '..spellName or '<NONAME?>', 1)
 			if skillInfo and skillInfo.useHook then
 				self:print('[SpellWatcher|Slot] updating '..spellName, 1)
 				self.SpellWatcher.spells[spellName] = { t = GetTime() }
@@ -463,10 +473,10 @@ function addon:PLAYER_LOGIN()
 	
 	SLASH_WHOKICKSNOW1, SLASH_WHOKICKSNOW2, SLASH_WHOKICKSNOW3 = '/whokicksnow', '/whokicks', '/wk'
 	function SlashCmdList.WHOKICKSNOW(arg)
-		local msg = {}
+		--[[local msg = {}
 		for w in gmatch(arg, '[^%s]+') do
 			tinsert(msg, w)
-		end
+		end]]
 		
 		if arg == 'debug' then
 			debug_level = debug_level + 1
@@ -478,8 +488,9 @@ function addon:PLAYER_LOGIN()
 				self:print('Resuming timers')
 			else
 				PAUSE = true
-				WKN_D1 = self.SpellWatcher.spells
-				WKN_D2 = self.main_frame.trackers[UnitName('player')].cooldowns.t
+				__WKN = self
+				__WKN_D1 = self.SpellWatcher.spells
+				__WKN_D2 = self.main_frame.trackers[UnitName('player')].cooldowns.t
 				self:print('Pausing timers')
 			end
 		elseif arg == 'indexes' then
@@ -489,14 +500,32 @@ function addon:PLAYER_LOGIN()
 					self:print(format('[%d] %s offset %d', frame.sortIndex, frame.text:GetText(), yOfs))
 				end
 			end
+		elseif arg == 'getpoints' then
+			self:GetAnchorPoint()
+		elseif arg == 'reset' then
+			self:ResetConfig()
+			self:print('Configuration has been reseted')
 		else
-			self:print('someday i will add useful message here')
+			self.enabled = not self.enabled
+			WhoKicksNowOptions.enabled = self.enabled
+			
+			if self.enabled then
+				self:HandlePlayerChange()
+				self.main_frame:Show()
+				self:print('Enabling AddOn')
+			else
+				self:HandlePlayerChange()
+				self.main_frame:Hide()
+				self:print('Disabling AddOn')
+			end
+			
 		end
 	end
 	
 	local main_frame = CreateFrame('Frame', nil, UIParent)
 	self.main_frame = main_frame
-	main_frame:SetPoint('CENTER', 0, 0)
+	self:print(format('loading frame position [%s] %f, %f', WhoKicksNowOptions.point, WhoKicksNowOptions.x, WhoKicksNowOptions.y), 1)
+	main_frame:SetPoint(WhoKicksNowOptions.point, WhoKicksNowOptions.x, WhoKicksNowOptions.y)
 	main_frame:SetWidth(MAINBAR_WIDTH)
 	main_frame:SetHeight(MAINBAR_HEIGHT)
 	main_frame:SetBackdrop({
@@ -514,10 +543,16 @@ function addon:PLAYER_LOGIN()
 	main_frame:EnableMouse(true)
 	main_frame:RegisterForDrag('LeftButton')
 	main_frame:SetScript('OnDragStart', function()
+		if self.locked then return end
 		this:StartMoving()
 	end)
 	main_frame:SetScript('OnDragStop', function()
 		this:StopMovingOrSizing()
+		local point, x, y = self:GetAnchorPoint()
+		WhoKicksNowOptions.point = point
+		WhoKicksNowOptions.x = x
+		WhoKicksNowOptions.y = y
+		self:print(format('saving frame position [%s] %f, %f', point, x, y), 1)
 	end)
 	main_frame.trackers = {}
 	main_frame.trackersCount = 0
@@ -525,8 +560,83 @@ function addon:PLAYER_LOGIN()
 	local text = main_frame:CreateFontString()
 	main_frame.text = text
 	text:SetFontObject(GameFontNormal)
-	text:SetAllPoints()
+	--text:SetAllPoints()
+	text:SetPoint('RIGHT', -15, 0)
 	text:SetText('Who Kicks Now?')
+	
+	local button_lock = CreateFrame('Button', nil, main_frame)
+	main_frame.button_lock = button_lock
+	button_lock:SetPoint('LEFT', main_frame, 'LEFT', 10, 0)
+	button_lock:SetWidth(ICON_WIDTH)
+	button_lock:SetHeight(ICON_HEIGHT)
+	
+	button_lock:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-open]])
+	button_lock:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-highlight]], 'ADD')
+	button_lock:SetDisabledTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-disabled]])
+	button_lock:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked]])
+	
+	button_lock:SetScript('OnClick', function()
+		self.locked = not self.locked
+		WhoKicksNowOptions.locked = self.locked
+		if this.locked then
+			this:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked]])
+			this:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-highlight]], 'ADD')
+			this:SetDisabledTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-disabled]])
+			this:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-pushed]])
+			PlaySound("KeyRingOpen")
+		else
+			this:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-open]])
+			this:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-highlight]], 'ADD')
+			this:SetDisabledTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-disabled]])
+			this:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-pushed]])
+			PlaySound("KeyRingClose")
+		end
+		self:LockGUI(self.locked)
+	end)
+	
+	self:HandlePlayerChange()
+end
+
+function addon:RAID_ROSTER_UPDATE()
+	self:print('RAID_ROSTER_UPDATE', 1)
+	self:HandlePlayerChange()
+end
+
+function addon:PARTY_MEMBERS_CHANGED()
+	self:print('PARTY_MEMBERS_CHANGED', 1)
+	self:HandlePlayerChange()
+end
+
+function addon:LockGUI(locked)
+	if locked then
+		self.main_frame.button_lock:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked]])
+		self.main_frame.button_lock:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-highlight]], 'ADD')
+		self.main_frame.button_lock:SetDisabledTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-disabled]])
+		self.main_frame.button_lock:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-pushed]])
+		
+		for name, tracker in pairs(self.main_frame.trackers) do
+			tracker:SetWidth(BAR_WIDTH_LOCKED)
+			tracker.button_up:Hide()
+			tracker.button_down:Hide()
+			tracker:EnableMouse(false)
+		end
+		
+		self.main_frame:EnableMouse(false)
+	else
+		self.main_frame.button_lock:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-open]])
+		self.main_frame.button_lock:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-highlight]], 'ADD')
+		self.main_frame.button_lock:SetDisabledTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-disabled]])
+		self.main_frame.button_lock:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-pushed]])
+		
+		for name, tracker in pairs(self.main_frame.trackers) do
+			tracker:SetWidth(BAR_WIDTH)
+			tracker.button_up:Show()
+			tracker.button_down:Show()
+			tracker:EnableMouse(true)
+		end
+		
+		self.main_frame:EnableMouse(true)
+	end
 end
 
 local frameid = 1
@@ -541,7 +651,7 @@ function addon:CreateTracker(name, class)
 	self.main_frame.trackers[name] = track_frame
 	track_frame.id = frameid
 	frameid = frameid + 1
-	track_frame:SetPoint('TOP', 0, -(BAR_HEIGHT*self.main_frame.trackersCount))
+	track_frame:SetPoint('TOPRIGHT', self.main_frame, 'BOTTOMRIGHT', 0, 0)
 	track_frame:SetWidth(BAR_WIDTH)
 	track_frame:SetHeight(BAR_HEIGHT)
 	track_frame:SetBackdrop({
@@ -549,13 +659,14 @@ function addon:CreateTracker(name, class)
 		edgeFile=[[Interface\Tooltips\UI-Tooltip-Border]],
 		tile = true,
 		tileSize = 16,
-		edgeSize = 10,
+		edgeSize = 12,
 		insets = { left = 2, right = 2, top = 2, bottom = 2 }
 	})
-	--track_frame:SetBackdropColor(0, 0, 0, .6)
 	track_frame:EnableMouse(true)
 	track_frame:SetScript('OnMouseDown', function()
-		if arg1 == 'RightButton' then
+		if arg1 == 'LeftButton' then
+			TargetByName(this.text:GetText(), 1)
+		elseif arg1 == 'RightButton' then
 			this.cooldowns.t = {
 				{name='Kidney Shot', remaining=20, cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
 				{name='Kick', remaining=10, miss=true, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
@@ -621,8 +732,10 @@ function addon:CreateTracker(name, class)
 				tracker_previous.button_down:Disable()
 			end
 			
-			tracker_current:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((tracker_current.sortIndex-1)*BAR_HEIGHT))
-			tracker_previous:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((tracker_previous.sortIndex-1)*BAR_HEIGHT))
+			local point, relativeTo, relativePoint, xOfs, yOfs = tracker_current:GetPoint()
+			tracker_current:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_current.sortIndex-1)*BAR_HEIGHT )
+			point = tracker_previous:GetPoint()
+			tracker_previous:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_previous.sortIndex-1)*BAR_HEIGHT )
 		end
 		
 	end)
@@ -676,8 +789,10 @@ function addon:CreateTracker(name, class)
 				tracker_next.button_up:Disable()
 			end
 			
-			tracker_next:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((tracker_next.sortIndex-1)*BAR_HEIGHT))
-			tracker_current:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((tracker_current.sortIndex-1)*BAR_HEIGHT))
+			local point, relativeTo, relativePoint, xOfs, yOfs = tracker_next:GetPoint()
+			tracker_next:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_next.sortIndex-1)*BAR_HEIGHT )
+			point = tracker_current:GetPoint()
+			tracker_current:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_current.sortIndex-1)*BAR_HEIGHT )
 		end
 		
 	end)
@@ -759,7 +874,6 @@ function addon:CreateTracker(name, class)
 	end)
 	
 	return track_frame
-	--track_frame:Show()
 end
 
 function addon:HandlePlayerChange()
@@ -800,7 +914,7 @@ function addon:HandlePlayerChange()
 	end
 	self.main_frame.trackersCount = 0
 	
-	if self.inGroup then
+	if self.inGroup and self.enabled then
 		local track_frame
 		local unsorted = {}
 		
@@ -808,13 +922,7 @@ function addon:HandlePlayerChange()
 			if self.groupMembers[i].class == 'ROGUE' then
 				self.main_frame.trackersCount = self.main_frame.trackersCount + 1
 				track_frame = self:CreateTracker(self.groupMembers[i].name, self.groupMembers[i].class)
-				--[[if i == 1 then
-					track_frame:SetPoint('TOP', 0, -MAINBAR_HEIGHT)
-				else
-					track_frame:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((self.main_frame.trackersCount-1)*BAR_HEIGHT))
-				end]]
 				unsorted[self.main_frame.trackersCount] = track_frame
-				--track_frame:Show()
 			end
 		end
 		
@@ -834,26 +942,36 @@ function addon:HandlePlayerChange()
 		end)
 		
 		self:print('adjusting frames position', 1)
+		local point, relativeTo, relativePoint, xOfs, yOfs
 		for i=1, self.main_frame.trackersCount do
 			unsorted[i].button_up:Enable()
 			unsorted[i].button_down:Enable()
+			unsorted[i].button_up:Show()
+			unsorted[i].button_down:Show()
+			point, relativeTo, relativePoint, xOfs, yOfs = unsorted[i]:GetPoint()
 			if i == 1 then
 				self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
-				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT)
+				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
 				unsorted[i].button_up:Disable()
 			elseif i == self.main_frame.trackersCount then
 				self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount), 1)
-				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((self.main_frame.trackersCount-1)*BAR_HEIGHT))
+				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(self.main_frame.trackersCount-1)*BAR_HEIGHT )
 				unsorted[i].button_down:Disable()
 			elseif self.main_frame.trackersCount == 1 then
 				self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
-				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT)
+				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
 				unsorted[i].button_up:Disable()
 				unsorted[i].button_down:Disable()
 			else
 				self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
-				unsorted[i]:SetPoint('TOP', 0, -MAINBAR_HEIGHT-((i-1)*BAR_HEIGHT))
+				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(i-1)*BAR_HEIGHT )
 			end
+			
+			if self.locked then
+				unsorted[i].button_up:Hide()
+				unsorted[i].button_down:Hide()
+			end
+			
 			unsorted[i].sortIndex = i
 			unsorted[i]:Show()
 			self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 1)
