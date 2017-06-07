@@ -461,7 +461,7 @@ function addon:ADDON_LOADED()
 			self.UseActionTooltip:SetAction(slot)
 			local spellName = self.UseActionTooltipText:GetText()
 			local skillInfo = self:GetSkillInfo(spellName)
-			self:print('[UseAction]  '..spellName or '<NONAME?>', 1)
+			self:print('[UseAction]  '..tostring(spellName), 1)
 			if skillInfo and skillInfo.useHook then
 				self:print('[SpellWatcher|Slot] updating '..spellName, 1)
 				self.SpellWatcher.spells[spellName] = { t = GetTime() }
