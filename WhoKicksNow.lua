@@ -45,8 +45,6 @@ local SKILLS = {
 }
 
 addon:RegisterEvent('ADDON_LOADED')
-addon:RegisterEvent('PARTY_MEMBERS_CHANGED')
-addon:RegisterEvent('RAID_ROSTER_UPDATE')
 
 function addon:RegisterCombatEvents()
 	addon:RegisterEvent('CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS')
@@ -510,12 +508,16 @@ function addon:ADDON_LOADED()
 			WhoKicksNowOptions.enabled = self.enabled
 			
 			if self.enabled then
+				self:RegisterEvent('PARTY_MEMBERS_CHANGED')
+				self:RegisterEvent('RAID_ROSTER_UPDATE')
 				self:HandlePlayerChange()
 				self.main_frame:Show()
 				self:print('Enabling AddOn')
 			else
 				self:HandlePlayerChange()
 				self.main_frame:Hide()
+				self:UnregisterEvent('PARTY_MEMBERS_CHANGED')
+				self:UnregisterEvent('RAID_ROSTER_UPDATE')
 				self:print('Disabling AddOn')
 			end
 			
@@ -594,7 +596,12 @@ function addon:ADDON_LOADED()
 		self:LockGUI(self.locked)
 	end)
 	
-	self:HandlePlayerChange()
+	if self.enabled then
+		self:RegisterEvent('PARTY_MEMBERS_CHANGED')
+		self:RegisterEvent('RAID_ROSTER_UPDATE')
+	else
+		main_frame:Hide()
+	end
 end
 
 function addon:RAID_ROSTER_UPDATE()
@@ -608,6 +615,7 @@ function addon:PARTY_MEMBERS_CHANGED()
 end
 
 function addon:LockGUI(locked)
+	self:print('LockGUI: '..tostring(locked), 1)
 	if locked then
 		self.main_frame.button_lock:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked]])
 		self.main_frame.button_lock:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-highlight]], 'ADD')
@@ -615,6 +623,7 @@ function addon:LockGUI(locked)
 		self.main_frame.button_lock:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-pushed]])
 		
 		for name, tracker in pairs(self.main_frame.trackers) do
+			self:print('[tracker] (locked)', 1)
 			tracker:SetWidth(BAR_WIDTH_LOCKED)
 			tracker.button_up:Hide()
 			tracker.button_down:Hide()
@@ -629,6 +638,7 @@ function addon:LockGUI(locked)
 		self.main_frame.button_lock:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-pushed]])
 		
 		for name, tracker in pairs(self.main_frame.trackers) do
+			self:print('[tracker] (unlocked)', 1)
 			tracker:SetWidth(BAR_WIDTH)
 			tracker.button_up:Show()
 			tracker.button_down:Show()
@@ -970,6 +980,9 @@ function addon:HandlePlayerChange()
 			if self.locked then
 				unsorted[i].button_up:Hide()
 				unsorted[i].button_down:Hide()
+				unsorted[i]:SetWidth(BAR_WIDTH_LOCKED)
+			else
+				unsorted[i]:SetWidth(BAR_WIDTH)
 			end
 			
 			unsorted[i].sortIndex = i
