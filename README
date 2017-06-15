@@ -35,7 +35,10 @@ Features:
   from your group who has this AddOn installed and running.
 
 Commands:
-- "/wk", "/whokicksnow" - enables or disables the AddOn
+- "/wk", "/whokicksnow" (alias) - enables or disables the AddOn
+- "/wk reset" - resets interface to default
+- "/wk update" - shows dialog box with link to latest release (only if your version is outdated)
+- "/wk debug" - wizzardy things, they will spam your chat window
 
 Known Issues:
 - Doesn't make Thistle Tea, unfortunetly.
