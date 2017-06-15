@@ -1,7 +1,8 @@
 ## Interface: 11200
 ## Title: WhoKicksNow
 ## Author: moh
-## Version: 1.0
+## Version: 1.1
 ## SavedVariablesPerCharacter: WhoKicksNowOptions
+## X-Website: https://github.com/yutsuku/WhoKicksNow
 
 WhoKicksNow.lua

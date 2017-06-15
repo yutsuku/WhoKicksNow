@@ -35,16 +35,51 @@ end)
 
 addon.Network = {
 	Cooldown = 'C',
+	Version = 'VERSION',
 }
 
 local SKILLS = {
 	{name='Kick', cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
 	{name='Cheap Shot', useHook=true, cooldown=1, texture=[[Interface\Icons\Ability_CheapShot]]},
-	{name='Kidney Shot', useHook=true, cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
+	{name='Kidney Shot', cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
 	{name='Gouge', cooldown=10, texture=[[Interface\Icons\Ability_Gouge]]},
 }
 
+local SPELLBOOK = {}
+
 addon:RegisterEvent('ADDON_LOADED')
+
+StaticPopupDialogs["WKN_UPDATEPOPUP"] = {
+	text = '[CTRL+A] then [CTRL+C] to Copy link to the clipboard',
+	button1 = TEXT(ACCEPT),
+	button2 = TEXT(CANCEL),
+	hasEditBox = 1,
+	maxLetters = 256,
+	hasWideEditBox = 1,
+	OnAccept = function()
+	end,
+	OnShow = function()
+		--getglobal(this:GetName().."WideEditBox"):SetText(GetGuildRosterMOTD());
+		--getglobal(this:GetName().."WideEditBox"):SetText(CURRENT_GUILD_MOTD)
+		--getglobal(this:GetName().."WideEditBox"):SetFocus()
+		this.editBox = getglobal(this:GetName().."WideEditBox")
+	end,
+	OnHide = function()
+		if ( ChatFrameEditBox:IsVisible() ) then
+			ChatFrameEditBox:SetFocus()
+		end
+	end,
+	EditBoxOnEnterPressed = function()
+		this:GetParent():Hide()
+	end,
+	EditBoxOnEscapePressed = function()
+		this:GetParent():Hide()
+	end,
+	timeout = 0,
+	exclusive = 1,
+	whileDead = 1,
+	hideOnEscape = 1
+}
 
 function addon:RegisterCombatEvents()
 	addon:RegisterEvent('CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS')
@@ -52,6 +87,7 @@ function addon:RegisterCombatEvents()
 	addon:RegisterEvent('CHAT_MSG_SPELL_SELF_DAMAGE')
 	addon:RegisterEvent('CHAT_MSG_SPELL_PARTY_DAMAGE')
 	addon:RegisterEvent('CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE')
+	addon:RegisterEvent('SPELL_UPDATE_COOLDOWN')
 	if NETWORK then
 		addon:RegisterEvent('CHAT_MSG_ADDON')
 	end
@@ -64,6 +100,7 @@ function addon:UnregisterCombatEvents()
 	addon:UnregisterEvent('CHAT_MSG_SPELL_SELF_DAMAGE')
 	addon:UnregisterEvent('CHAT_MSG_SPELL_PARTY_DAMAGE')
 	addon:UnregisterEvent('CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE')
+	addon:UnregisterEvent('SPELL_UPDATE_COOLDOWN')
 	if NETWORK then
 		addon:UnregisterEvent('CHAT_MSG_ADDON')
 	end
@@ -177,6 +214,19 @@ function addon:CHAT_MSG_ADDON()
 		tinsert(msg, w)
 	end 
 	
+	if len == 4 and msg[3] == self.Network.Version --[[and arg4 ~= UnitName('player')]] then
+		-- received version message
+		local netversion = tonumber(msg[2])
+		local url = string.gsub(msg[4], '\124', '\124\124') -- paranoia from the webdev days
+		self:print('[NET] '..arg4..' v'..netversion, 2)
+		if netversion > tonumber(self.version) and string.find(url, '^.-://') then -- ensure "PROTOCOL://DATA" format
+			self.networkUpdateURL = url
+			self:print(arg4..' has newer version than yours. Updating is highly recommended.')
+			self:print('Update URL: '..url)
+			self:print('Type "/wk update" to copy download link.')
+		end
+	end
+	
 	if len == 4 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
 		-- received cooldown message
 		local skillInfo = self:GetSkillInfo(msg[4])
@@ -184,17 +234,19 @@ function addon:CHAT_MSG_ADDON()
 			return
 		end
 		
-		local obj = {
-			name = skillInfo.name,
-			remaining = skillInfo.cooldown,
-			miss = false,
-			cooldown = skillInfo.cooldown,
-			texture = skillInfo.texture
-		}
-		
-		table.insert(self.main_frame.trackers[arg4].cooldowns.t, obj)
-		self.main_frame.trackers[arg4].cooldowns:Show()
+		self:ApplyCooldown(arg4, skillInfo, false)
 		self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name, 1)
+	end
+	
+	if len == 5 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
+		-- received cooldown message (miss)
+		local skillInfo = self:GetSkillInfo(msg[4])
+		if not skillInfo then
+			return
+		end
+		
+		self:ApplyCooldown(arg4, skillInfo, true)
+		self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name..' (miss)', 1)
 	end
 end
 
@@ -207,10 +259,72 @@ function addon:NetworkSendUpdate(message)
 	msg = msg .. message .. ';'
 	
 	if GetNumRaidMembers() > 0 then
+		self:print('[NET] OUT RAID', 3)
 		SendAddonMessage('WhoKicksNow', msg, 'RAID')
 	elseif GetNumPartyMembers() > 0 then
+		self:print('[NET] OUT PARTY', 3)
 		SendAddonMessage('WhoKicksNow', msg, 'PARTY')
 	end
+end
+
+function addon:PopulateSpells(reset)
+	if reset then
+		SPELLBOOK = {}
+	end
+	
+	local MAX_TABS = GetNumSpellTabs()
+	
+	for tab=1, MAX_TABS do
+		local name, texture, offset, numSpells = GetSpellTabInfo(tab)
+		
+		for spell=1, numSpells do
+			local currentPage = ceil(spell/SPELLS_PER_PAGE)
+			local SpellID = spell + offset + ( SPELLS_PER_PAGE * (currentPage - 1))
+			local spellName, spellRank = GetSpellName(SpellID, "spell")
+			local skillInfo = self:GetSkillInfo(spellName)
+			if skillInfo then
+				tinsert(SPELLBOOK, {name=skillInfo.name, id=SpellID})
+			end
+		end
+	end
+	
+end
+
+function addon:ApplyCooldown(name, skillInfo, miss)
+	if
+		not name
+		or not skillInfo
+		or not skillInfo.name
+		or not skillInfo.cooldown
+		or not skillInfo.texture
+		or not self.main_frame.trackers[name]
+	then 
+		return
+	end
+
+	local obj = {
+		name = skillInfo.name,
+		remaining = skillInfo.cooldown,
+		miss = miss,
+		cooldown = skillInfo.cooldown,
+		texture = skillInfo.texture
+	}
+	
+	local found
+	for i=1, getn(self.main_frame.trackers[name].cooldowns.t) do
+		if self.main_frame.trackers[name].cooldowns.t[i].name == skillInfo.name then
+			found = i
+			break
+		end
+	end
+	
+	if found then
+		self.main_frame.trackers[name].cooldowns.t[found] = obj
+	else
+		table.insert(self.main_frame.trackers[name].cooldowns.t, obj)
+	end
+
+	self.main_frame.trackers[name].cooldowns:Show()
 end
 
 -- important combat events
@@ -221,17 +335,8 @@ function addon:CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS() -- can occur OUTSIDE PAR
 	if not name or not skillInfo or not self:IsInGroup(name) then
 		return
 	end
-	
-	local obj = {
-		name = skillInfo.name,
-		remaining = skillInfo.cooldown,
-		miss = true,
-		cooldown = skillInfo.cooldown,
-		texture = skillInfo.texture
-	}
-	
-	table.insert(self.main_frame.trackers[name].cooldowns.t, obj)
-	self.main_frame.trackers[name].cooldowns:Show()
+
+	self:ApplyCooldown(name, skillInfo, true)
 	self:print('[DAMAGESHIELDS_ON_OTHERS] Showing cooldowns for '..name..' due to missed '..skillInfo.name, 1)
 end
 
@@ -244,20 +349,12 @@ function addon:CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF()
 	if not skillInfo then
 		return
 	end
-	
-	local obj = {
-		name = skillInfo.name,
-		remaining = skillInfo.cooldown,
-		miss = true,
-		cooldown = skillInfo.cooldown,
-		texture = skillInfo.texture
-	}
-	
-	if self.SpellWatcher.spells[skill] then
+
+	self:ApplyCooldown(UnitName('player'), skillInfo, true)
+	for skill, spellData in pairs(self.SpellWatcher.spells) do
 		self.SpellWatcher.spells[skill].fail = true
 	end
-	table.insert(self.main_frame.trackers[UnitName('player')].cooldowns.t, obj)
-	self.main_frame.trackers[UnitName('player')].cooldowns:Show()
+	self:NetworkSendUpdate(format('%s;%s;%s', self.Network.Cooldown, skillInfo.name, 1))
 	self:print('[DAMAGESHIELDS_ON_SELF] Showing cooldowns for you due to missed '..skill, 1)
 end
 
@@ -269,17 +366,8 @@ function addon:CHAT_MSG_SPELL_SELF_DAMAGE()
 	if not skillInfo then
 		return
 	end
-	
-	local obj = {
-		name = skillInfo.name,
-		remaining = skillInfo.cooldown,
-		miss = false,
-		cooldown = skillInfo.cooldown,
-		texture = skillInfo.texture
-	}
-	
-	table.insert(self.main_frame.trackers[UnitName('player')].cooldowns.t, obj)
-	self.main_frame.trackers[UnitName('player')].cooldowns:Show()
+
+	self:ApplyCooldown(UnitName('player'), skillInfo, false)
 	self:print('[SELF_DAMAGE] Showing cooldowns for you due to '..skill, 1)
 end
 
@@ -292,16 +380,7 @@ function addon:CHAT_MSG_SPELL_PARTY_DAMAGE()
 		return
 	end
 	
-	local obj = {
-		name = skillInfo.name,
-		remaining = skillInfo.cooldown,
-		miss = false,
-		cooldown = skillInfo.cooldown,
-		texture = skillInfo.texture
-	}
-	
-	table.insert(self.main_frame.trackers[name].cooldowns.t, obj)
-	self.main_frame.trackers[name].cooldowns:Show()
+	self:ApplyCooldown(name, skillInfo, false)
 	self:print('[PARTY_DAMAGE] Showing cooldowns for '..name..' due to '..skillInfo.name, 1)
 end
 
@@ -312,17 +391,28 @@ function addon:CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE() -- fucking raid groups, ca
 		return
 	end
 	
-	local obj = {
-		name = skillInfo.name,
-		remaining = skillInfo.cooldown,
-		miss = false,
-		cooldown = skillInfo.cooldown,
-		texture = skillInfo.texture
-	}
-	
-	table.insert(self.main_frame.trackers[name].cooldowns.t, obj)
-	self.main_frame.trackers[name].cooldowns:Show()
+	self:ApplyCooldown(name, skillInfo, false)
 	self:print('[FRIENDLYPLAYER_DAMAGE] Showing cooldowns for '..name..' due to '..skillInfo.name, 1)
+end
+
+local oncd = {}
+function addon:SPELL_UPDATE_COOLDOWN() -- lag-independed way to detect kidney shot, hopefully
+	self:print('SPELL_UPDATE_COOLDOWN', 1)
+	for i=1, getn(SPELLBOOK) do
+		local t, cd = GetSpellCooldown(SPELLBOOK[i].id, "spell")
+		self:print(SPELLBOOK[i].name..' cd '..cd, 2)
+		if cd > 1 then
+			if not oncd[SPELLBOOK[i].id] or oncd[SPELLBOOK[i].id] < t then
+			
+				oncd[SPELLBOOK[i].id] = t
+				local skillInfo = self:GetSkillInfo(SPELLBOOK[i].name)
+				
+				self:ApplyCooldown(UnitName('player'), skillInfo, false)
+				self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
+				self:print('[SPELL_UPDATE_COOLDOWN] Showing cooldowns for you due to '..skillInfo.name, 1)
+			end
+		end
+	end
 end
 -- end of important combat events
 
@@ -350,6 +440,8 @@ function addon:ADDON_LOADED()
 	self.enabled = WhoKicksNowOptions.enabled
 	self.inGroup = false
 	self.version = GetAddOnMetadata('WhoKicksNow', 'Version')
+	self.updateURL = GetAddOnMetadata('WhoKicksNow', 'X-Website')
+	self.networkUpdateURL = nil
 	
 	--[[addon:RegisterAllEvents()
 	addon:SetScript('OnEvent', function()
@@ -392,16 +484,7 @@ function addon:ADDON_LOADED()
 					return
 				end
 				
-				local obj = {
-					name = skillInfo.name,
-					remaining = skillInfo.cooldown,
-					miss = false,
-					cooldown = skillInfo.cooldown,
-					texture = skillInfo.texture
-				}
-				
-				table.insert(self.main_frame.trackers[UnitName('player')].cooldowns.t, obj)
-				self.main_frame.trackers[UnitName('player')].cooldowns:Show()
+				self:ApplyCooldown(UnitName('player'), skillInfo, false)
 				self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
 				self:print('[SpellWatcher] Showing cooldowns for you due to '..skill..' ('..spellData.t+SPELL_FAIL_TIME..' < '..now..')', 1)
 				self.SpellWatcher.spells[skill] = nil
@@ -483,6 +566,9 @@ function addon:ADDON_LOADED()
 		elseif arg == 'pause' then
 			if PAUSE then
 				PAUSE = false
+				__WKN = nil
+				__WKN_D1 = nil
+				__WKN_D2 = nil
 				self:print('Resuming timers')
 			else
 				PAUSE = true
@@ -503,6 +589,14 @@ function addon:ADDON_LOADED()
 		elseif arg == 'reset' then
 			self:ResetConfig()
 			self:print('Configuration has been reseted')
+		elseif arg == 'update' then
+			self:print('Showing update url')
+			--self.networkUpdateURL
+			local dialog = StaticPopup_Show('WKN_UPDATEPOPUP')
+			if dialog then
+				dialog:SetWidth(420)
+				dialog.editBox:SetText(self.networkUpdateURL)
+			end
 		else
 			self.enabled = not self.enabled
 			WhoKicksNowOptions.enabled = self.enabled
@@ -597,8 +691,10 @@ function addon:ADDON_LOADED()
 	end)
 	
 	if self.enabled then
+		self:PopulateSpells()
 		self:RegisterEvent('PARTY_MEMBERS_CHANGED')
 		self:RegisterEvent('RAID_ROSTER_UPDATE')
+		self:HandlePlayerChange()
 	else
 		main_frame:Hide()
 	end
@@ -886,8 +982,11 @@ function addon:CreateTracker(name, class)
 	return track_frame
 end
 
+local _inGroup = false
 function addon:HandlePlayerChange()
 	local players = {}
+	local group = false
+	
 	if GetNumRaidMembers() > 0 then
 		local name, _, class
 		for i=1, GetNumRaidMembers() do
@@ -898,6 +997,7 @@ function addon:HandlePlayerChange()
 			end
 		end
 		self.inGroup = true
+		group = 1
 	elseif GetNumPartyMembers() > 0 then
 		local name, _, class
 		for i=1, GetNumPartyMembers() do
@@ -910,6 +1010,7 @@ function addon:HandlePlayerChange()
 		_, class = UnitClass('player')
 		players[GetNumPartyMembers()+1] = {name=UnitName('player'),class=strupper(class)}
 		self.inGroup = true
+		group = 2
 	else
 		self.inGroup = false
 	end
@@ -923,6 +1024,14 @@ function addon:HandlePlayerChange()
 		frame:Hide()
 	end
 	self.main_frame.trackersCount = 0
+	
+	if group ~= _inGroup then
+		_inGroup = group
+		if self.inGroup then
+			-- trigger network message when joining a party/raid
+			self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL)
+		end
+	end
 	
 	if self.inGroup and self.enabled then
 		local track_frame
