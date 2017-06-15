@@ -59,9 +59,6 @@ StaticPopupDialogs["WKN_UPDATEPOPUP"] = {
 	OnAccept = function()
 	end,
 	OnShow = function()
-		--getglobal(this:GetName().."WideEditBox"):SetText(GetGuildRosterMOTD());
-		--getglobal(this:GetName().."WideEditBox"):SetText(CURRENT_GUILD_MOTD)
-		--getglobal(this:GetName().."WideEditBox"):SetFocus()
 		this.editBox = getglobal(this:GetName().."WideEditBox")
 	end,
 	OnHide = function()
@@ -214,7 +211,7 @@ function addon:CHAT_MSG_ADDON()
 		tinsert(msg, w)
 	end 
 	
-	if len == 4 and msg[3] == self.Network.Version --[[and arg4 ~= UnitName('player')]] then
+	if len == 4 and msg[3] == self.Network.Version and arg4 ~= UnitName('player') then
 		-- received version message
 		local netversion = tonumber(msg[2])
 		local url = string.gsub(msg[4], '\124', '\124\124') -- paranoia from the webdev days
@@ -591,7 +588,6 @@ function addon:ADDON_LOADED()
 			self:print('Configuration has been reseted')
 		elseif arg == 'update' then
 			self:print('Showing update url')
-			--self.networkUpdateURL
 			local dialog = StaticPopup_Show('WKN_UPDATEPOPUP')
 			if dialog then
 				dialog:SetWidth(420)
@@ -656,7 +652,6 @@ function addon:ADDON_LOADED()
 	local text = main_frame:CreateFontString()
 	main_frame.text = text
 	text:SetFontObject(GameFontNormal)
-	--text:SetAllPoints()
 	text:SetPoint('RIGHT', -15, 0)
 	text:SetText('Who Kicks Now?')
 	
