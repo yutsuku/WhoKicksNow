@@ -36,6 +36,8 @@ end)
 addon.Network = {
 	Cooldown = 'C',
 	Version = 'VERSION',
+	VersionCheck = 'VER_REQ',
+	VersionCheckReply = 'VER_INF',
 }
 
 local SKILLS = {
@@ -50,7 +52,7 @@ local SPELLBOOK = {}
 addon:RegisterEvent('ADDON_LOADED')
 
 StaticPopupDialogs["WKN_UPDATEPOPUP"] = {
-	text = '[CTRL+A] then [CTRL+C] to Copy link to the clipboard',
+	text = 'Copy link to the clipboard',
 	button1 = TEXT(ACCEPT),
 	button2 = TEXT(CANCEL),
 	hasEditBox = 1,
@@ -196,54 +198,72 @@ function addon:print(message, level, headless)
 	end
 end
 
-function addon:CHAT_MSG_ADDON()
-	if arg1 ~= 'WhoKicksNow' then
-		return
-	end
-	
-	self:print(format('--RAW [%s] --\n%s\n--ENDRAW--', arg4, arg2), 2)
-	
-	local msg = {}
-	local len = 0
-	for w in gmatch(arg2, '[^;]+') do
-		len = len + 1
-		self:print(format('[%d] WORD "%s"', len, w), 3)
-		tinsert(msg, w)
-	end 
-	
-	if len == 4 and msg[3] == self.Network.Version and arg4 ~= UnitName('player') then
-		-- received version message
-		local netversion = tonumber(msg[2])
-		local url = string.gsub(msg[4], '\124', '\124\124') -- paranoia from the webdev days
-		self:print('[NET] '..arg4..' v'..netversion, 2)
-		if netversion > tonumber(self.version) and string.find(url, '^.-://') then -- ensure "PROTOCOL://DATA" format
-			self.networkUpdateURL = url
-			self:print(arg4..' has newer version than yours. Updating is highly recommended.')
-			self:print('Update URL: '..url)
-			self:print('Type "/wk update" to copy download link.')
-		end
-	end
-	
-	if len == 4 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
-		-- received cooldown message
-		local skillInfo = self:GetSkillInfo(msg[4])
-		if not skillInfo then
+do
+	local ignoreUpdate
+	function addon:CHAT_MSG_ADDON()
+		if arg1 ~= 'WhoKicksNow' then
 			return
 		end
 		
-		self:ApplyCooldown(arg4, skillInfo, false)
-		self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name, 1)
-	end
-	
-	if len == 5 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
-		-- received cooldown message (miss)
-		local skillInfo = self:GetSkillInfo(msg[4])
-		if not skillInfo then
-			return
+		self:print(format('--RAW [%s] --\n%s\n--ENDRAW--', arg4, arg2), 2)
+		
+		local msg = {}
+		local len = 0
+		for w in gmatch(arg2, '[^;]+') do
+			len = len + 1
+			self:print(format('[%d] WORD "%s"', len, w), 3)
+			tinsert(msg, w)
 		end
 		
-		self:ApplyCooldown(arg4, skillInfo, true)
-		self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name..' (miss)', 1)
+		if len == 3 and msg[3] == self.Network.VersionCheck --[[and arg4 ~= UnitName('player')]] then
+			-- received version check message
+			local netversion = tonumber(msg[2])
+			self:print('[NET:CHECK] '..arg4..' v'..netversion, 2)
+			self:NetworkSendUpdate(self.Network.VersionCheckReply)
+		end
+		
+		if len == 3 and msg[3] == self.Network.VersionCheckReply and self.netPing --[[and arg4 ~= UnitName('player')]] then
+			-- received version check reply message
+			local netversion = tonumber(msg[2])
+			self:print('[NET:REPLY] '..arg4..' v'..netversion, 2)
+			self:NetworkPingReply(arg4, netversion)
+		end
+		
+		if len == 4 and msg[3] == self.Network.Version and arg4 ~= UnitName('player') then
+			-- received version message
+			local netversion = tonumber(msg[2])
+			local url = string.gsub(msg[4], '\124', '\124\124') -- paranoia from the webdev days
+			self:print('[NET] '..arg4..' v'..netversion, 2)
+			if netversion > tonumber(self.version) and string.find(url, '^.-://') and not ignoreUpdate then -- ensure "PROTOCOL://DATA" format
+				self.networkUpdateURL = url
+				ignoreUpdate = true
+				self:print(arg4..' has newer version than yours. Updating is highly recommended.')
+				self:print('Update URL: '..url)
+				self:print('Type "/wk update" to copy download link.')
+			end
+		end
+		
+		if len == 4 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
+			-- received cooldown message
+			local skillInfo = self:GetSkillInfo(msg[4])
+			if not skillInfo then
+				return
+			end
+			
+			self:ApplyCooldown(arg4, skillInfo, false)
+			self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name, 1)
+		end
+		
+		if len == 5 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
+			-- received cooldown message (miss)
+			local skillInfo = self:GetSkillInfo(msg[4])
+			if not skillInfo then
+				return
+			end
+			
+			self:ApplyCooldown(arg4, skillInfo, true)
+			self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name..' (miss)', 1)
+		end
 	end
 end
 
@@ -266,6 +286,42 @@ function addon:NetworkSendUpdate(message, guild)
 	if guild and IsInGuild() then
 		self:print('[NET] OUT GUILD', 3)
 		SendAddonMessage('WhoKicksNow', msg, 'PARTY')
+	end
+end
+
+function addon:NetworkPing(ready)
+	self:print('[NetworkPing] '..tostring(ready), 1)
+	if ready then
+		self:print('[NetworkPing] version check ready', 3)
+		for k,frame in pairs(self.main_frame.trackers) do
+			frame.net:Hide()
+			frame.net.status:SetVertexColor(1, 1, 1)
+			frame.net.status:Hide()
+		end
+	else
+		self:print('[NetworkPing] requesting version check', 3)
+		for k,frame in pairs(self.main_frame.trackers) do
+			frame.net.status:SetVertexColor(1, 1, 1)
+			frame.net.status:Hide()
+			frame.net:Show()
+		end
+		self.netPing = true
+		self.main_frame.netPingFrame:Show()
+		self:NetworkSendUpdate(self.Network.VersionCheck)
+	end
+end
+
+function addon:NetworkPingReply(name, version)
+	for k,frame in pairs(self.main_frame.trackers) do
+		if frame.text:GetText() == name then
+			frame.net:Show()
+			if version > tonumber(self.version) then
+				frame.net.status:SetVertexColor(0.6, 1, 0.6)
+			elseif version < tonumber(self.version) then
+				frame.net.status:SetVertexColor(1, 0.6, 0.6)
+			end
+			frame.net.status:Show()
+		end
 	end
 end
 
@@ -397,21 +453,23 @@ function addon:CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE() -- fucking raid groups, ca
 	self:print('[FRIENDLYPLAYER_DAMAGE] Showing cooldowns for '..name..' due to '..skillInfo.name, 1)
 end
 
-local oncd = {}
-function addon:SPELL_UPDATE_COOLDOWN() -- lag-independed way to detect kidney shot, hopefully
-	self:print('SPELL_UPDATE_COOLDOWN', 1)
-	for i=1, getn(SPELLBOOK) do
-		local t, cd = GetSpellCooldown(SPELLBOOK[i].id, "spell")
-		self:print(SPELLBOOK[i].name..' cd '..cd, 2)
-		if cd > 1 then
-			if not oncd[SPELLBOOK[i].id] or oncd[SPELLBOOK[i].id] < t then
-			
-				oncd[SPELLBOOK[i].id] = t
-				local skillInfo = self:GetSkillInfo(SPELLBOOK[i].name)
+do
+	local oncd = {}
+	function addon:SPELL_UPDATE_COOLDOWN() -- lag-independed way to detect kidney shot, hopefully
+		self:print('SPELL_UPDATE_COOLDOWN', 1)
+		for i=1, getn(SPELLBOOK) do
+			local t, cd = GetSpellCooldown(SPELLBOOK[i].id, "spell")
+			self:print(SPELLBOOK[i].name..' cd '..cd, 2)
+			if cd > 1 then
+				if not oncd[SPELLBOOK[i].id] or oncd[SPELLBOOK[i].id] < t then
 				
-				self:ApplyCooldown(UnitName('player'), skillInfo, false)
-				self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
-				self:print('[SPELL_UPDATE_COOLDOWN] Showing cooldowns for you due to '..skillInfo.name, 1)
+					oncd[SPELLBOOK[i].id] = t
+					local skillInfo = self:GetSkillInfo(SPELLBOOK[i].name)
+					
+					self:ApplyCooldown(UnitName('player'), skillInfo, false)
+					self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
+					self:print('[SPELL_UPDATE_COOLDOWN] Showing cooldowns for you due to '..skillInfo.name, 1)
+				end
 			end
 		end
 	end
@@ -546,6 +604,46 @@ function addon:CreateGUI()
 		end
 		self:LockGUI(self.locked)
 	end)
+	
+	local netPingFrame = CreateFrame('Frame')
+	main_frame.netPingFrame = netPingFrame
+	netPingFrame.elapsed = 0
+	netPingFrame:SetScript('OnShow', function()
+		this.elapsed = 0
+	end)
+	netPingFrame:SetScript('OnUpdate', function()
+		if not self.netPing then
+			this:Hide()
+		end
+		this.elapsed = this.elapsed + arg1
+		if this.elapsed > 5 then
+			self.netPing = false
+			this:Hide()
+			self:print('[netPingFrame] finished in '..this.elapsed, 3)
+			self:NetworkPing(true)
+		end
+	end)
+	netPingFrame:Hide()
+	
+	local button_query = CreateFrame('Button', nil, main_frame)
+	main_frame.button_query = button_query
+	button_query:SetPoint('LEFT', main_frame, 'RIGHT', 0, 0)
+	button_query:SetWidth(ICON_WIDTH)
+	button_query:SetHeight(ICON_HEIGHT)
+	
+	button_query:SetNormalTexture([[Interface\GossipFrame\GossipGossipIcon]])
+	button_query:SetHighlightTexture([[Interface\GossipFrame\PetitionGossipIcon]], 'BLEND')
+	button_query:SetPushedTexture([[Interface\GossipFrame\PetitionGossipIcon]])
+	
+	button_query:SetScript('OnClick', function()
+		self:print('Clicked query button', 1)
+		self:NetworkPing()
+	end)
+	
+	self:print('BUTTON_PING:LOCKED? '..tostring(self.locked), 1)
+	if self.locked then
+		button_query:Hide()
+	end
 end
 
 function addon:ADDON_LOADED()
@@ -725,6 +823,7 @@ function addon:LockGUI(locked)
 		end
 		
 		self.main_frame:EnableMouse(false)
+		self.main_frame.button_query:Hide()
 	else
 		self.main_frame.button_lock:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-open]])
 		self.main_frame.button_lock:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-highlight]], 'ADD')
@@ -740,365 +839,400 @@ function addon:LockGUI(locked)
 		end
 		
 		self.main_frame:EnableMouse(true)
+		self.main_frame.button_query:Show()
 	end
 end
 
-local frameid = 1
-function addon:CreateTracker(name, class)
-	self:print('creating frame for '..name..', '..class, 1)
+do
+	local frameid = 1
+	function addon:CreateTracker(name, class)
+		self:print('creating frame for '..name..', '..class, 1)
 
-	if self.main_frame.trackers[name] then
-		return self.main_frame.trackers[name]
-	end
-	
-	local track_frame = CreateFrame('Frame', nil, self.main_frame)
-	self.main_frame.trackers[name] = track_frame
-	track_frame.id = frameid
-	frameid = frameid + 1
-	track_frame:SetPoint('TOPRIGHT', self.main_frame, 'BOTTOMRIGHT', 0, 0)
-	track_frame:SetWidth(BAR_WIDTH)
-	track_frame:SetHeight(BAR_HEIGHT)
-	track_frame:SetBackdrop({
-		bgFile=[[Interface\Tooltips\ChatBubble-Background]],
-		edgeFile=[[Interface\Tooltips\UI-Tooltip-Border]],
-		tile = true,
-		tileSize = 16,
-		edgeSize = 12,
-		insets = { left = 2, right = 2, top = 2, bottom = 2 }
-	})
-	track_frame:EnableMouse(true)
-	track_frame:SetScript('OnMouseDown', function()
-		if arg1 == 'LeftButton' then
-			TargetByName(this.text:GetText(), 1)
-		elseif arg1 == 'RightButton' then
-			this.cooldowns.t = {
-				{name='Kidney Shot', remaining=20, cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
-				{name='Kick', remaining=10, miss=true, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
-			}
-			this.cooldowns:Show()
-			self:print('Test mode for '..this.text:GetText())
-		end
-	end)
-	
-	local text = track_frame:CreateFontString()
-	track_frame.text = text
-	text:SetFontObject(GameFontNormal)
-	text:SetTextColor(RAID_CLASS_COLORS[class].r, RAID_CLASS_COLORS[class].g, RAID_CLASS_COLORS[class].b)
-	text:SetAllPoints()
-	text:SetText(name)
-	
-	local button_up = CreateFrame('Button', nil, track_frame)
-	track_frame.button_up = button_up
-	button_up:SetPoint('RIGHT', self.main_frame.trackers[name], 'LEFT', 0, 0)
-	button_up:SetWidth(ICON_WIDTH)
-	button_up:SetHeight(ICON_HEIGHT)
-	
-	button_up:SetNormalTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Up]])
-	button_up:SetHighlightTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Highlight]])
-	button_up:SetDisabledTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Disabled]])
-	button_up:SetPushedTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Down]])
-	
-	button_up:SetScript('OnClick', function()
-		local id = this:GetParent().sortIndex
-		local id_previous = id-1
-		local id_next = id+1
-		
-		local tracker_current, tracker_previous, tracker_next
-		
-		self:print('[Up] '..id..' => '..id_previous, 1)
-		
-		for name, tracker in pairs(self.main_frame.trackers) do
-			if tracker.sortIndex == id_next then
-				tracker_next = tracker
-			end
-			if tracker.sortIndex == id_previous then
-				tracker_previous = tracker
-			end
-			if tracker.sortIndex == id then
-				tracker_current = tracker
-			end
+		if self.main_frame.trackers[name] then
+			return self.main_frame.trackers[name]
 		end
 		
-		if tracker_previous and tracker_current then
-			tracker_previous.sortIndex = id
-			tracker_current.sortIndex = id_previous
-			
-			tracker_previous.button_up:Enable()
-			tracker_previous.button_down:Enable()
-			tracker_current.button_up:Enable()
-			tracker_current.button_down:Enable()
-			
-			if tracker_current.sortIndex == 1 then
-				tracker_current.button_up:Disable()
+		local track_frame = CreateFrame('Frame', nil, self.main_frame)
+		self.main_frame.trackers[name] = track_frame
+		track_frame.id = frameid
+		frameid = frameid + 1
+		track_frame:SetPoint('TOPRIGHT', self.main_frame, 'BOTTOMRIGHT', 0, 0)
+		track_frame:SetWidth(BAR_WIDTH)
+		track_frame:SetHeight(BAR_HEIGHT)
+		track_frame:SetBackdrop({
+			bgFile=[[Interface\Tooltips\ChatBubble-Background]],
+			edgeFile=[[Interface\Tooltips\UI-Tooltip-Border]],
+			tile = true,
+			tileSize = 16,
+			edgeSize = 12,
+			insets = { left = 2, right = 2, top = 2, bottom = 2 }
+		})
+		track_frame:EnableMouse(true)
+		track_frame:SetScript('OnMouseDown', function()
+			if arg1 == 'LeftButton' then
+				TargetByName(this.text:GetText(), 1)
+			elseif arg1 == 'RightButton' then
+				this.cooldowns.t = {
+					{name='Kidney Shot', remaining=20, cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
+					{name='Kick', remaining=10, miss=true, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
+				}
+				this.cooldowns:Show()
+				self:print('Test mode for '..this.text:GetText())
 			end
-			
-			if tracker_previous.sortIndex == self.main_frame.trackersCount then
-				tracker_previous.button_down:Disable()
-			end
-			
-			local point, relativeTo, relativePoint, xOfs, yOfs = tracker_current:GetPoint()
-			tracker_current:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_current.sortIndex-1)*BAR_HEIGHT )
-			point = tracker_previous:GetPoint()
-			tracker_previous:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_previous.sortIndex-1)*BAR_HEIGHT )
-		end
-		
-	end)
-	
-	local button_down = CreateFrame('Button', nil, track_frame)
-	track_frame.button_down = button_down
-	button_down:SetPoint('RIGHT', self.main_frame.trackers[name], 'LEFT', -ICON_WIDTH, 0)
-	button_down:SetWidth(ICON_WIDTH)
-	button_down:SetHeight(ICON_HEIGHT)
-	
-	button_down:SetNormalTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Up]])
-	button_down:SetHighlightTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Highlight]])
-	button_down:SetDisabledTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Disabled]])
-	button_down:SetPushedTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Down]])
-	
-	button_down:SetScript('OnClick', function()
-		local id = this:GetParent().sortIndex
-		local id_previous = id-1
-		local id_next = id+1
-		
-		local tracker_current, tracker_previous, tracker_next
-		
-		self:print('[Down] '..id..' => '..id_next, 1)
-		
-		for name, tracker in pairs(self.main_frame.trackers) do
-			if tracker.sortIndex == id_next then
-				tracker_next = tracker
-			end
-			if tracker.sortIndex == id_previous then
-				tracker_previous = tracker
-			end
-			if tracker.sortIndex == id then
-				tracker_current = tracker
-			end
-		end
-		
-		if tracker_next and tracker_current then
-			tracker_next.sortIndex = id
-			tracker_current.sortIndex = id_next
-			
-			tracker_next.button_up:Enable()
-			tracker_next.button_down:Enable()
-			tracker_current.button_up:Enable()
-			tracker_current.button_down:Enable()
-			
-			if tracker_current.sortIndex == self.main_frame.trackersCount then
-				tracker_current.button_down:Disable()
-			end
-			
-			if tracker_next.sortIndex == 1 then
-				tracker_next.button_up:Disable()
-			end
-			
-			local point, relativeTo, relativePoint, xOfs, yOfs = tracker_next:GetPoint()
-			tracker_next:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_next.sortIndex-1)*BAR_HEIGHT )
-			point = tracker_current:GetPoint()
-			tracker_current:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_current.sortIndex-1)*BAR_HEIGHT )
-		end
-		
-	end)
-	
-	local cooldowns = self.main_frame.trackers[name].cooldowns or CreateFrame('Frame', nil, self.main_frame.trackers[name])
-	self.main_frame.trackers[name].cooldowns = cooldowns
-	cooldowns:SetPoint('LEFT', self.main_frame.trackers[name], 'RIGHT', 0, 0)
-	cooldowns:SetWidth(COOLDOWN_WIDTH)
-	cooldowns:SetHeight(COOLDOWN_HEIGHT)
-	cooldowns:SetBackdrop({
-		bgFile=[[Interface\ChatFrame\ChatFrameBackground]],
-		tile = true,
-		tileSize = 16,
-	})
-    cooldowns:SetBackdropColor(0, 0, 0, .6)
-	
-	cooldowns.icons = {}
-	cooldowns.MakeIcon = function(obj, parent)
-		local iconFrame = CreateFrame('Frame', nil, parent)
-		this.icons[obj.name] = iconFrame
-		iconFrame:SetWidth(ICONF_WIDTH)
-		iconFrame:SetHeight(ICONF_HEIGHT)
-		iconFrame.unused = false
-		
-		local icon = iconFrame:CreateTexture()
-		iconFrame.icon = icon
-		icon:SetPoint('TOPLEFT', iconFrame, 'TOPLEFT', 0, 0)
-		icon:SetWidth(ICON_WIDTH)
-		icon:SetHeight(ICON_HEIGHT)
-		icon:SetTexture(obj.texture)
-		
-		local text = iconFrame:CreateFontString()
-		iconFrame.text = text
-		text:SetFontObject(GameFontNormal)
-		text:SetJustifyH('LEFT')
-		--text:SetAllPoints(icon)
-		text:SetPoint('LEFT', icon, 'RIGHT', 1, 0)
-		
-		return iconFrame
-	end
-	
-	cooldowns.t = {}
-	--[[
-		{
-			{name='Kick', remaining=2, miss=false, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
-		}
-	]]
-	cooldowns:SetScript('OnUpdate', function()
-		if PAUSE then return end
-		-- update timers
-		for i=getn(this.t), 1, -1 do
-			this.t[i].remaining = this.t[i].remaining-arg1
-			if this.t[i].remaining <= 0 then
-				this.icons[this.t[i].name]:Hide()
-				tremove(this.t, i)
-			end
-		end
-		
-		if getn(this.t) == 0 then this:Hide() return end
-		
-		this:SetWidth(getn(this.t) * ICONF_WIDTH)
-		
-		local iconFrame
-		for i=1, getn(this.t) do
-			iconFrame = this.icons[this.t[i].name] or this.MakeIcon(this.t[i], this)
-			if i == 1 then
-				iconFrame:SetPoint('LEFT', this, 'LEFT', 0, 0)
-			else
-				iconFrame:SetPoint('LEFT', this, 'LEFT', ICONF_WIDTH*(i-1), 0)
-			end
-			iconFrame.text:SetText(ceil(this.t[i].remaining))
-			if this.t[i].miss then
-				iconFrame.icon:SetVertexColor(1, 0, 0)
-			else
-				iconFrame.icon:SetVertexColor(1, 1, 1)
-			end
-			iconFrame:Show()
-		end
-	end)
-	
-	return track_frame
-end
-
-local _inGroup = false
-function addon:HandlePlayerChange()
-	local players = {}
-	local group = false
-	
-	if GetNumRaidMembers() > 0 then
-		local name, _, class
-		for i=1, GetNumRaidMembers() do
-			_, class = UnitClass('raid'..i)
-			name = UnitName('raid'..i)
-			if name and class then
-				players[i] = {name=name,class=strupper(class)}
-			end
-		end
-		self.inGroup = true
-		group = 1
-	elseif GetNumPartyMembers() > 0 then
-		local name, _, class
-		for i=1, GetNumPartyMembers() do
-			_, class = UnitClass('party'..i)
-			name = UnitName('party'..i)
-			if name and class then
-				players[i] = {name=name,class=strupper(class)}
-			end
-		end
-		_, class = UnitClass('player')
-		players[GetNumPartyMembers()+1] = {name=UnitName('player'),class=strupper(class)}
-		self.inGroup = true
-		group = 2
-	else
-		self.inGroup = false
-	end
-	self.groupMembers = players
-	
-	for k,frame in pairs(self.main_frame.trackers) do
-		-- reset sort index from non-group players
-		if not self:IsInGroup(frame.text:GetText()) then
-			frame.sortIndex = nil
-		end
-		frame:Hide()
-	end
-	self.main_frame.trackersCount = 0
-	
-	if group ~= _inGroup then
-		_inGroup = group
-		if self.inGroup then
-			-- trigger network message when joining a party/raid
-			self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL)
-		end
-	end
-	
-	if self.inGroup and self.enabled then
-		local track_frame
-		local unsorted = {}
-		
-		for i=1, getn(self.groupMembers) do
-			if self.groupMembers[i].class == 'ROGUE' then
-				self.main_frame.trackersCount = self.main_frame.trackersCount + 1
-				track_frame = self:CreateTracker(self.groupMembers[i].name, self.groupMembers[i].class)
-				unsorted[self.main_frame.trackersCount] = track_frame
-			end
-		end
-		
-		sort(unsorted, function(a, b)
-			-- sort by index pairs, then index if any, then name
-			if a.sortIndex and b.sortIndex then
-				return a.sortIndex < b.sortIndex
-			end
-			if a.sortIndex and not b.sortIndex then
-				return true
-			end
-			if b.sortIndex and not a.sortIndex then
-				return false
-			end
-
-			return a.text:GetText() < b.text:GetText()
 		end)
 		
-		self:print('adjusting frames position', 1)
-		local point, relativeTo, relativePoint, xOfs, yOfs
-		for i=1, self.main_frame.trackersCount do
-			unsorted[i].button_up:Enable()
-			unsorted[i].button_down:Enable()
-			unsorted[i].button_up:Show()
-			unsorted[i].button_down:Show()
-			point, relativeTo, relativePoint, xOfs, yOfs = unsorted[i]:GetPoint()
-			if i == 1 then
-				self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
-				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
-				unsorted[i].button_up:Disable()
-			elseif i == self.main_frame.trackersCount then
-				self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount), 1)
-				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(self.main_frame.trackersCount-1)*BAR_HEIGHT )
-				unsorted[i].button_down:Disable()
-			elseif self.main_frame.trackersCount == 1 then
-				self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
-				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
-				unsorted[i].button_up:Disable()
-				unsorted[i].button_down:Disable()
-			else
-				self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
-				unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(i-1)*BAR_HEIGHT )
+		local text = track_frame:CreateFontString()
+		track_frame.text = text
+		text:SetFontObject(GameFontNormal)
+		text:SetTextColor(RAID_CLASS_COLORS[class].r, RAID_CLASS_COLORS[class].g, RAID_CLASS_COLORS[class].b)
+		text:SetAllPoints()
+		text:SetText(name)
+		
+		local button_up = CreateFrame('Button', nil, track_frame)
+		track_frame.button_up = button_up
+		button_up:SetPoint('RIGHT', self.main_frame.trackers[name], 'LEFT', 0, 0)
+		button_up:SetWidth(ICON_WIDTH)
+		button_up:SetHeight(ICON_HEIGHT)
+		
+		button_up:SetNormalTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Up]])
+		button_up:SetHighlightTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Highlight]])
+		button_up:SetDisabledTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Disabled]])
+		button_up:SetPushedTexture([[Interface\Buttons\UI-ScrollBar-ScrollUpButton-Down]])
+		
+		button_up:SetScript('OnClick', function()
+			local id = this:GetParent().sortIndex
+			local id_previous = id-1
+			local id_next = id+1
+			
+			local tracker_current, tracker_previous, tracker_next
+			
+			self:print('[Up] '..id..' => '..id_previous, 1)
+			
+			for name, tracker in pairs(self.main_frame.trackers) do
+				if tracker.sortIndex == id_next then
+					tracker_next = tracker
+				end
+				if tracker.sortIndex == id_previous then
+					tracker_previous = tracker
+				end
+				if tracker.sortIndex == id then
+					tracker_current = tracker
+				end
 			end
 			
-			if self.locked then
-				unsorted[i].button_up:Hide()
-				unsorted[i].button_down:Hide()
-				unsorted[i]:SetWidth(BAR_WIDTH_LOCKED)
-			else
-				unsorted[i]:SetWidth(BAR_WIDTH)
+			if tracker_previous and tracker_current then
+				tracker_previous.sortIndex = id
+				tracker_current.sortIndex = id_previous
+				
+				tracker_previous.button_up:Enable()
+				tracker_previous.button_down:Enable()
+				tracker_current.button_up:Enable()
+				tracker_current.button_down:Enable()
+				
+				if tracker_current.sortIndex == 1 then
+					tracker_current.button_up:Disable()
+				end
+				
+				if tracker_previous.sortIndex == self.main_frame.trackersCount then
+					tracker_previous.button_down:Disable()
+				end
+				
+				local point, relativeTo, relativePoint, xOfs, yOfs = tracker_current:GetPoint()
+				tracker_current:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_current.sortIndex-1)*BAR_HEIGHT )
+				point = tracker_previous:GetPoint()
+				tracker_previous:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_previous.sortIndex-1)*BAR_HEIGHT )
 			end
 			
-			unsorted[i].sortIndex = i
-			unsorted[i]:Show()
-			self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 1)
+		end)
+		
+		local button_down = CreateFrame('Button', nil, track_frame)
+		track_frame.button_down = button_down
+		button_down:SetPoint('RIGHT', self.main_frame.trackers[name], 'LEFT', -ICON_WIDTH, 0)
+		button_down:SetWidth(ICON_WIDTH)
+		button_down:SetHeight(ICON_HEIGHT)
+		
+		button_down:SetNormalTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Up]])
+		button_down:SetHighlightTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Highlight]])
+		button_down:SetDisabledTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Disabled]])
+		button_down:SetPushedTexture([[Interface\Buttons\UI-ScrollBar-ScrollDownButton-Down]])
+		
+		button_down:SetScript('OnClick', function()
+			local id = this:GetParent().sortIndex
+			local id_previous = id-1
+			local id_next = id+1
+			
+			local tracker_current, tracker_previous, tracker_next
+			
+			self:print('[Down] '..id..' => '..id_next, 1)
+			
+			for name, tracker in pairs(self.main_frame.trackers) do
+				if tracker.sortIndex == id_next then
+					tracker_next = tracker
+				end
+				if tracker.sortIndex == id_previous then
+					tracker_previous = tracker
+				end
+				if tracker.sortIndex == id then
+					tracker_current = tracker
+				end
+			end
+			
+			if tracker_next and tracker_current then
+				tracker_next.sortIndex = id
+				tracker_current.sortIndex = id_next
+				
+				tracker_next.button_up:Enable()
+				tracker_next.button_down:Enable()
+				tracker_current.button_up:Enable()
+				tracker_current.button_down:Enable()
+				
+				if tracker_current.sortIndex == self.main_frame.trackersCount then
+					tracker_current.button_down:Disable()
+				end
+				
+				if tracker_next.sortIndex == 1 then
+					tracker_next.button_up:Disable()
+				end
+				
+				local point, relativeTo, relativePoint, xOfs, yOfs = tracker_next:GetPoint()
+				tracker_next:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_next.sortIndex-1)*BAR_HEIGHT )
+				point = tracker_current:GetPoint()
+				tracker_current:SetPoint(point, relativeTo, relativePoint, xOfs, -(tracker_current.sortIndex-1)*BAR_HEIGHT )
+			end
+			
+		end)
+		
+		local cooldowns = self.main_frame.trackers[name].cooldowns or CreateFrame('Frame', nil, self.main_frame.trackers[name])
+		self.main_frame.trackers[name].cooldowns = cooldowns
+		cooldowns:SetPoint('LEFT', self.main_frame.trackers[name], 'RIGHT', 0, 0)
+		cooldowns:SetWidth(COOLDOWN_WIDTH)
+		cooldowns:SetHeight(COOLDOWN_HEIGHT)
+		cooldowns:SetBackdrop({
+			bgFile=[[Interface\ChatFrame\ChatFrameBackground]],
+			tile = true,
+			tileSize = 16,
+		})
+		cooldowns:SetBackdropColor(0, 0, 0, .6)
+		
+		cooldowns.icons = {}
+		cooldowns.MakeIcon = function(obj, parent)
+			local iconFrame = CreateFrame('Frame', nil, parent)
+			this.icons[obj.name] = iconFrame
+			iconFrame:SetWidth(ICONF_WIDTH)
+			iconFrame:SetHeight(ICONF_HEIGHT)
+			iconFrame.unused = false
+			
+			local icon = iconFrame:CreateTexture()
+			iconFrame.icon = icon
+			icon:SetPoint('TOPLEFT', iconFrame, 'TOPLEFT', 0, 0)
+			icon:SetWidth(ICON_WIDTH)
+			icon:SetHeight(ICON_HEIGHT)
+			icon:SetTexture(obj.texture)
+			
+			local text = iconFrame:CreateFontString()
+			iconFrame.text = text
+			text:SetFontObject(GameFontNormal)
+			text:SetJustifyH('LEFT')
+			--text:SetAllPoints(icon)
+			text:SetPoint('LEFT', icon, 'RIGHT', 1, 0)
+			
+			return iconFrame
 		end
 		
-		self:RegisterCombatEvents()
-	else
-		self:UnregisterCombatEvents()
+		cooldowns.t = {}
+		--[[
+			{
+				{name='Kick', remaining=2, miss=false, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
+			}
+		]]
+		cooldowns:SetScript('OnUpdate', function()
+			if PAUSE then return end
+			-- update timers
+			for i=getn(this.t), 1, -1 do
+				this.t[i].remaining = this.t[i].remaining-arg1
+				if this.t[i].remaining <= 0 then
+					this.icons[this.t[i].name]:Hide()
+					tremove(this.t, i)
+				end
+			end
+			
+			if getn(this.t) == 0 then this:Hide() return end
+			
+			this:SetWidth(getn(this.t) * ICONF_WIDTH)
+			
+			local iconFrame
+			for i=1, getn(this.t) do
+				iconFrame = this.icons[this.t[i].name] or this.MakeIcon(this.t[i], this)
+				if i == 1 then
+					iconFrame:SetPoint('LEFT', this, 'LEFT', 0, 0)
+				else
+					iconFrame:SetPoint('LEFT', this, 'LEFT', ICONF_WIDTH*(i-1), 0)
+				end
+				iconFrame.text:SetText(ceil(this.t[i].remaining))
+				if this.t[i].miss then
+					iconFrame.icon:SetVertexColor(1, 0, 0)
+				else
+					iconFrame.icon:SetVertexColor(1, 1, 1)
+				end
+				iconFrame:Show()
+			end
+		end)
+		
+		do
+			local net = CreateFrame('Frame', nil, track_frame)
+			track_frame.net = net
+			net:SetPoint('LEFT', self.main_frame.trackers[name], 'LEFT', 4, 0)
+			net:SetWidth(16)
+			net:SetHeight(16)
+			
+			net:SetBackdrop({
+				bgFile=[[Interface\Buttons\YELLOWORANGE64]],
+				tile = false,
+				tileSize = 16,
+			})
+			net:SetBackdropColor(1, 1, 1, 0)
+			
+			local backdrop = net:CreateTexture(nil, 'BORDER')
+			net.backdrop = backdrop
+			backdrop:SetAllPoints()
+			backdrop:SetTexture([[Interface\Buttons\UI-RadioButton]])
+			backdrop:SetTexCoord(0, 0.25, 0, 1)
+			
+			local status = net:CreateTexture(nil, 'ARTWORK')
+			net.status = status
+			status:SetAllPoints()
+			status:SetTexture([[Interface\Buttons\UI-RadioButton]])
+			status:SetTexCoord(0.26, 0.49, 0, 1)
+			
+			net:Hide()
+			status:Hide()
+		end
+		
+		return track_frame
+	end
+end
+
+do
+	local _inGroup = false
+	function addon:HandlePlayerChange()
+		local players = {}
+		local group = false
+		
+		if GetNumRaidMembers() > 0 then
+			local name, _, class
+			for i=1, GetNumRaidMembers() do
+				_, class = UnitClass('raid'..i)
+				name = UnitName('raid'..i)
+				if name and class then
+					players[i] = {name=name,class=strupper(class)}
+				end
+			end
+			self.inGroup = true
+			group = 1
+		elseif GetNumPartyMembers() > 0 then
+			local name, _, class
+			for i=1, GetNumPartyMembers() do
+				_, class = UnitClass('party'..i)
+				name = UnitName('party'..i)
+				if name and class then
+					players[i] = {name=name,class=strupper(class)}
+				end
+			end
+			_, class = UnitClass('player')
+			players[GetNumPartyMembers()+1] = {name=UnitName('player'),class=strupper(class)}
+			self.inGroup = true
+			group = 2
+		else
+			self.inGroup = false
+		end
+		self.groupMembers = players
+		
+		for k,frame in pairs(self.main_frame.trackers) do
+			-- reset sort index from non-group players
+			if not self:IsInGroup(frame.text:GetText()) then
+				frame.sortIndex = nil
+			end
+			frame:Hide()
+		end
+		self.main_frame.trackersCount = 0
+		
+		if group ~= _inGroup then
+			_inGroup = group
+			if self.inGroup then
+				-- trigger network message when joining a party/raid
+				self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL)
+			end
+		end
+		
+		if self.inGroup and self.enabled then
+			local track_frame
+			local unsorted = {}
+			
+			for i=1, getn(self.groupMembers) do
+				if self.groupMembers[i].class == 'ROGUE' then
+					self.main_frame.trackersCount = self.main_frame.trackersCount + 1
+					track_frame = self:CreateTracker(self.groupMembers[i].name, self.groupMembers[i].class)
+					unsorted[self.main_frame.trackersCount] = track_frame
+				end
+			end
+			
+			sort(unsorted, function(a, b)
+				-- sort by index pairs, then index if any, then name
+				if a.sortIndex and b.sortIndex then
+					return a.sortIndex < b.sortIndex
+				end
+				if a.sortIndex and not b.sortIndex then
+					return true
+				end
+				if b.sortIndex and not a.sortIndex then
+					return false
+				end
+
+				return a.text:GetText() < b.text:GetText()
+			end)
+			
+			self:print('adjusting frames position', 1)
+			local point, relativeTo, relativePoint, xOfs, yOfs
+			for i=1, self.main_frame.trackersCount do
+				unsorted[i].button_up:Enable()
+				unsorted[i].button_down:Enable()
+				unsorted[i].button_up:Show()
+				unsorted[i].button_down:Show()
+				point, relativeTo, relativePoint, xOfs, yOfs = unsorted[i]:GetPoint()
+				if i == 1 then
+					self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
+					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
+					unsorted[i].button_up:Disable()
+				elseif i == self.main_frame.trackersCount then
+					self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount), 1)
+					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(self.main_frame.trackersCount-1)*BAR_HEIGHT )
+					unsorted[i].button_down:Disable()
+				elseif self.main_frame.trackersCount == 1 then
+					self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
+					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
+					unsorted[i].button_up:Disable()
+					unsorted[i].button_down:Disable()
+				else
+					self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
+					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(i-1)*BAR_HEIGHT )
+				end
+				
+				if self.locked then
+					unsorted[i].button_up:Hide()
+					unsorted[i].button_down:Hide()
+					unsorted[i]:SetWidth(BAR_WIDTH_LOCKED)
+				else
+					unsorted[i]:SetWidth(BAR_WIDTH)
+				end
+				
+				unsorted[i].sortIndex = i
+				unsorted[i]:Show()
+				self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 1)
+			end
+			
+			self:RegisterCombatEvents()
+		else
+			self:UnregisterCombatEvents()
+		end
 	end
 end
