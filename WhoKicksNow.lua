@@ -247,7 +247,7 @@ function addon:CHAT_MSG_ADDON()
 	end
 end
 
-function addon:NetworkSendUpdate(message)
+function addon:NetworkSendUpdate(message, guild)
 	if not NETWORK then return end
 	
 	local msg = ''
@@ -260,6 +260,11 @@ function addon:NetworkSendUpdate(message)
 		SendAddonMessage('WhoKicksNow', msg, 'RAID')
 	elseif GetNumPartyMembers() > 0 then
 		self:print('[NET] OUT PARTY', 3)
+		SendAddonMessage('WhoKicksNow', msg, 'PARTY')
+	end
+	
+	if guild and IsInGuild() then
+		self:print('[NET] OUT GUILD', 3)
 		SendAddonMessage('WhoKicksNow', msg, 'PARTY')
 	end
 end
@@ -422,87 +427,7 @@ function addon:ResetConfig()
 	WhoKicksNowOptions.locked = false
 end
 
-function addon:ADDON_LOADED()
-	if arg1 ~= 'WhoKicksNow' then
-		return
-	end
-	if not WhoKicksNowOptions then
-		self:ResetConfig()
-		self:print('config created')
-	end
-	self:print('loaded')
-	
-	self.groupMembers = {}
-	self.locked = WhoKicksNowOptions.locked
-	self.enabled = WhoKicksNowOptions.enabled
-	self.inGroup = false
-	self.version = GetAddOnMetadata('WhoKicksNow', 'Version')
-	self.updateURL = GetAddOnMetadata('WhoKicksNow', 'X-Website')
-	self.networkUpdateURL = nil
-	
-	--[[addon:RegisterAllEvents()
-	addon:SetScript('OnEvent', function()
-		local s = ""
-		if arg1 then s = s..' arg1: '..arg1 end
-		if arg2 then s = s..' arg2: '..arg2 end
-		if arg3 then s = s..' arg3: '..arg3 end
-		if arg4 then s = s..' arg4: '..arg4 end
-		if arg5 then s = s..' arg5: '..arg5 end
-		if arg6 then s = s..' arg6: '..arg6 end
-		if arg7 then s = s..' arg7: '..arg7 end
-		if arg8 then s = s..' arg8: '..arg8 end
-		if arg9 then s = s..' arg9: '..arg9 end
-		if ( strsub(event, 1, 8) == "CHAT_MSG" ) then
-			self:print(event, 0)
-			self:print(s, 0, true)
-		else
-			self:print(event, 1)
-			self:print(s, 1, true)
-		end
-	end)]]
-	
-	-- relay on timing 
-	local SPELL_FAIL_TIME = 0.3
-	self.SpellWatcher = CreateFrame('Frame')
-	self.SpellWatcher:SetScript('OnUpdate', function()
-		local now = GetTime()
-		for skill, spellData in pairs(self.SpellWatcher.spells) do
-			if spellData.t+SPELL_FAIL_TIME < now then
-				if spellData.fail or not spellData.cast then
-					-- cast failed
-					self.SpellWatcher.spells[skill] = nil
-					self:print('[SpellWatcher] '..skill..' failed ('..spellData.t..', now: '..now..')', 1)
-					break
-				end
-				
-				-- cast was successful
-				local skillInfo = self:GetSkillInfo(skill)
-				if not skillInfo or not skillInfo.useHook then
-					return
-				end
-				
-				self:ApplyCooldown(UnitName('player'), skillInfo, false)
-				self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
-				self:print('[SpellWatcher] Showing cooldowns for you due to '..skill..' ('..spellData.t+SPELL_FAIL_TIME..' < '..now..')', 1)
-				self.SpellWatcher.spells[skill] = nil
-			end
-		end
-		
-	end)
-	
-	self.SpellWatcher:SetScript('OnEvent', function()
-		local now = GetTime()
-		if event == 'SPELLCAST_STOP' then
-		
-			for skill, spellData in pairs(self.SpellWatcher.spells) do
-				self.SpellWatcher.spells[skill].cast = true
-			end
-			
-		end
-	end)
-	
-	self.SpellWatcher.spells = {}
-	
+function addon:SetHooks()
 	-- hooks
 	self.CastSpellByName = CastSpellByName
 	self.CastSpell = CastSpell
@@ -548,72 +473,9 @@ function addon:ADDON_LOADED()
 		self.UseAction(slot, flags, onSelf)
 	end
 	-- hooks end
-	
-	SLASH_WHOKICKSNOW1, SLASH_WHOKICKSNOW2, SLASH_WHOKICKSNOW3 = '/whokicksnow', '/whokicks', '/wk'
-	function SlashCmdList.WHOKICKSNOW(arg)
-		--[[local msg = {}
-		for w in gmatch(arg, '[^%s]+') do
-			tinsert(msg, w)
-		end]]
-		
-		if arg == 'debug' then
-			debug_level = debug_level + 1
-			if debug_level > 3 then debug_level = 0 end
-			self:print('Debug level is now set to ' .. debug_level)
-		elseif arg == 'pause' then
-			if PAUSE then
-				PAUSE = false
-				__WKN = nil
-				__WKN_D1 = nil
-				__WKN_D2 = nil
-				self:print('Resuming timers')
-			else
-				PAUSE = true
-				__WKN = self
-				__WKN_D1 = self.SpellWatcher.spells
-				__WKN_D2 = self.main_frame.trackers[UnitName('player')].cooldowns.t
-				self:print('Pausing timers')
-			end
-		elseif arg == 'indexes' then
-			for k,frame in pairs(self.main_frame.trackers) do
-				if frame:IsVisible() then
-					local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint()
-					self:print(format('[%d] %s offset %d', frame.sortIndex, frame.text:GetText(), yOfs))
-				end
-			end
-		elseif arg == 'getpoints' then
-			self:GetAnchorPoint()
-		elseif arg == 'reset' then
-			self:ResetConfig()
-			self:print('Configuration has been reseted')
-		elseif arg == 'update' then
-			self:print('Showing update url')
-			local dialog = StaticPopup_Show('WKN_UPDATEPOPUP')
-			if dialog then
-				dialog:SetWidth(420)
-				dialog.editBox:SetText(self.networkUpdateURL)
-			end
-		else
-			self.enabled = not self.enabled
-			WhoKicksNowOptions.enabled = self.enabled
-			
-			if self.enabled then
-				self:RegisterEvent('PARTY_MEMBERS_CHANGED')
-				self:RegisterEvent('RAID_ROSTER_UPDATE')
-				self:HandlePlayerChange()
-				self.main_frame:Show()
-				self:print('Enabling AddOn')
-			else
-				self:HandlePlayerChange()
-				self.main_frame:Hide()
-				self:UnregisterEvent('PARTY_MEMBERS_CHANGED')
-				self:UnregisterEvent('RAID_ROSTER_UPDATE')
-				self:print('Disabling AddOn')
-			end
-			
-		end
-	end
-	
+end
+
+function addon:CreateGUI()
 	local main_frame = CreateFrame('Frame', nil, UIParent)
 	self.main_frame = main_frame
 	self:print(format('loading frame position [%s] %f, %f', WhoKicksNowOptions.point, WhoKicksNowOptions.x, WhoKicksNowOptions.y), 1)
@@ -684,12 +546,153 @@ function addon:ADDON_LOADED()
 		end
 		self:LockGUI(self.locked)
 	end)
+end
+
+function addon:ADDON_LOADED()
+	if arg1 ~= 'WhoKicksNow' then
+		return
+	end
+	if not WhoKicksNowOptions then
+		self:ResetConfig()
+		self:print('config created')
+	end
+	self:print('loaded')
+	
+	self.groupMembers = {}
+	self.locked = WhoKicksNowOptions.locked
+	self.enabled = WhoKicksNowOptions.enabled
+	self.inGroup = false
+	self.version = GetAddOnMetadata('WhoKicksNow', 'Version')
+	self.updateURL = GetAddOnMetadata('WhoKicksNow', 'X-Website')
+	self.networkUpdateURL = nil
+	
+	--[[addon:RegisterAllEvents()
+	addon:SetScript('OnEvent', function()
+		local s = ""
+		if arg1 then s = s..' arg1: '..arg1 end
+		if arg2 then s = s..' arg2: '..arg2 end
+		if arg3 then s = s..' arg3: '..arg3 end
+		if arg4 then s = s..' arg4: '..arg4 end
+		if arg5 then s = s..' arg5: '..arg5 end
+		if arg6 then s = s..' arg6: '..arg6 end
+		if arg7 then s = s..' arg7: '..arg7 end
+		if arg8 then s = s..' arg8: '..arg8 end
+		if arg9 then s = s..' arg9: '..arg9 end
+		if ( strsub(event, 1, 8) == "CHAT_MSG" ) then
+			self:print(event, 0)
+			self:print(s, 0, true)
+		else
+			self:print(event, 1)
+			self:print(s, 1, true)
+		end
+	end)]]
+	
+	-- relay on timing 
+	local SPELL_FAIL_TIME = 0.3
+	self.SpellWatcher = CreateFrame('Frame')
+	
+	self.SpellWatcher:SetScript('OnUpdate', function()
+		local now = GetTime()
+		for skill, spellData in pairs(self.SpellWatcher.spells) do
+			if spellData.t+SPELL_FAIL_TIME < now then
+				if spellData.fail or not spellData.cast then
+					-- cast failed
+					self.SpellWatcher.spells[skill] = nil
+					self:print('[SpellWatcher] '..skill..' failed ('..spellData.t..', now: '..now..')', 1)
+					break
+				end
+				-- cast was successful
+				local skillInfo = self:GetSkillInfo(skill)
+				if not skillInfo or not skillInfo.useHook then
+					return
+				end
+				
+				self:ApplyCooldown(UnitName('player'), skillInfo, false)
+				self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
+				self:print('[SpellWatcher] Showing cooldowns for you due to '..skill..' ('..spellData.t+SPELL_FAIL_TIME..' < '..now..')', 1)
+				self.SpellWatcher.spells[skill] = nil
+			end
+		end
+		
+	end)
+	self.SpellWatcher:SetScript('OnEvent', function()
+		local now = GetTime()
+		if event == 'SPELLCAST_STOP' then
+			for skill, spellData in pairs(self.SpellWatcher.spells) do
+				self.SpellWatcher.spells[skill].cast = true
+			end
+		end
+	end)
+	self.SpellWatcher.spells = {}
+	
+	SLASH_WHOKICKSNOW1, SLASH_WHOKICKSNOW2, SLASH_WHOKICKSNOW3 = '/whokicksnow', '/whokicks', '/wk'
+	function SlashCmdList.WHOKICKSNOW(arg)
+		if arg == 'debug' then
+			debug_level = debug_level + 1
+			if debug_level > 3 then debug_level = 0 end
+			self:print('Debug level is now set to ' .. debug_level)
+		elseif arg == 'pause' then
+			if PAUSE then
+				PAUSE = false
+				__WKN = nil
+				__WKN_D1 = nil
+				__WKN_D2 = nil
+				self:print('Resuming timers')
+			else
+				PAUSE = true
+				__WKN = self
+				__WKN_D1 = self.SpellWatcher.spells
+				__WKN_D2 = self.main_frame.trackers[UnitName('player')].cooldowns.t
+				self:print('Pausing timers')
+			end
+		elseif arg == 'indexes' then
+			for k,frame in pairs(self.main_frame.trackers) do
+				if frame:IsVisible() then
+					local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint()
+					self:print(format('[%d] %s offset %d', frame.sortIndex, frame.text:GetText(), yOfs))
+				end
+			end
+		elseif arg == 'getpoints' then
+			self:GetAnchorPoint()
+		elseif arg == 'reset' then
+			self:ResetConfig()
+			self:print('Configuration has been reseted')
+		elseif arg == 'update' then
+			self:print('Showing update url')
+			local dialog = StaticPopup_Show('WKN_UPDATEPOPUP')
+			if dialog then
+				dialog:SetWidth(420)
+				dialog.editBox:SetText(self.networkUpdateURL)
+			end
+		else
+			self.enabled = not self.enabled
+			WhoKicksNowOptions.enabled = self.enabled
+			
+			if self.enabled then
+				self:RegisterEvent('PARTY_MEMBERS_CHANGED')
+				self:RegisterEvent('RAID_ROSTER_UPDATE')
+				self:HandlePlayerChange()
+				self.main_frame:Show()
+				self:print('Enabling AddOn')
+			else
+				self:HandlePlayerChange()
+				self.main_frame:Hide()
+				self:UnregisterEvent('PARTY_MEMBERS_CHANGED')
+				self:UnregisterEvent('RAID_ROSTER_UPDATE')
+				self:print('Disabling AddOn')
+			end
+		end
+	end
+	
+	self:SetHooks()
+	self:CreateGUI()
 	
 	if self.enabled then
 		self:PopulateSpells()
 		self:RegisterEvent('PARTY_MEMBERS_CHANGED')
 		self:RegisterEvent('RAID_ROSTER_UPDATE')
 		self:HandlePlayerChange()
+		self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL, true)
 	else
 		main_frame:Hide()
 	end
