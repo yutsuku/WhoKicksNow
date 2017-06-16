@@ -792,7 +792,7 @@ function addon:ADDON_LOADED()
 		self:HandlePlayerChange()
 		self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL, true)
 	else
-		main_frame:Hide()
+		self.main_frame:Hide()
 	end
 end
 
