@@ -771,6 +771,7 @@ function addon:ADDON_LOADED()
 			WhoKicksNowOptions.enabled = self.enabled
 			
 			if self.enabled then
+				self:PopulateSpells(true)
 				self:RegisterEvent('PARTY_MEMBERS_CHANGED')
 				self:RegisterEvent('RAID_ROSTER_UPDATE')
 				self:HandlePlayerChange()
