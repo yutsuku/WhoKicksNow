@@ -50,6 +50,8 @@ local SKILLS = {
 local SPELLBOOK = {}
 
 addon:RegisterEvent('ADDON_LOADED')
+addon:RegisterEvent('PLAYER_ENTERING_WORLD')
+addon:RegisterEvent('PLAYER_LEAVING_WORLD')
 
 StaticPopupDialogs["WKN_UPDATEPOPUP"] = {
 	text = 'Copy link to the clipboard',
@@ -345,6 +347,8 @@ function addon:PopulateSpells(reset)
 			end
 		end
 	end
+	
+	self:print('PopulateSpells: '..getn(SPELLBOOK)..' spells ready', 2)
 	
 end
 
@@ -796,6 +800,22 @@ function addon:ADDON_LOADED()
 	end
 end
 
+function addon:PLAYER_ENTERING_WORLD()
+	if self.enabled then
+		self:RegisterCombatEvents()
+		self:RegisterEvent('PARTY_MEMBERS_CHANGED')
+		self:RegisterEvent('RAID_ROSTER_UPDATE')
+		self:PopulateSpells(true)
+	end
+end
+
+function addon:PLAYER_LEAVING_WORLD()
+	-- ignore events when zoning in/out
+	self:UnregisterCombatEvents()
+	self:UnregisterEvent('PARTY_MEMBERS_CHANGED')
+	self:UnregisterEvent('RAID_ROSTER_UPDATE')
+end
+
 function addon:RAID_ROSTER_UPDATE()
 	self:print('RAID_ROSTER_UPDATE', 1)
 	self:HandlePlayerChange()
@@ -1145,6 +1165,12 @@ do
 		else
 			self.inGroup = false
 		end
+		
+		if getn(self.groupMembers) == getn(players) then
+			self:print('HandlePlayerChange: nothing important has changed', 1)
+			return
+		end
+		
 		self.groupMembers = players
 		
 		for k,frame in pairs(self.main_frame.trackers) do
