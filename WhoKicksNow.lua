@@ -352,6 +352,31 @@ function addon:PopulateSpells(reset)
 	
 end
 
+function addon:ResetCooldowns(name)
+	if not name then
+		-- reset cooldowns for all players
+		for tname, tracker in pairs(self.main_frame.trackers) do
+			for k, v in pairs(tracker.cooldowns.icons) do
+				v.text:SetText()
+				v:Hide()
+			end
+			tracker.cooldowns.t = {}
+			tracker.cooldowns:SetWidth(0)
+		end
+	else
+		-- reset cooldowns for specific player
+		if not self.main_frame.trackers[name] then
+			return
+		end
+		for k, v in pairs(self.main_frame.trackers[name].cooldowns.icons) do
+			v.text:SetText()
+			v:Hide()
+		end
+		self.main_frame.trackers[name].cooldowns.t = {}
+		self.main_frame.trackers[name].cooldowns:SetWidth(0)
+	end	
+end
+
 function addon:ApplyCooldown(name, skillInfo, miss)
 	if
 		not name
@@ -537,6 +562,63 @@ function addon:SetHooks()
 	-- hooks end
 end
 
+-- update trackers frame: is player alive? is player connected? is player near us?
+function addon:UpdateWorldStatus()
+	local name, _, class, unitid
+	
+	if GetNumRaidMembers() > 0 then
+		for i=1, GetNumRaidMembers() do
+			unitid = 'raid'..i
+			_, class = UnitClass(unitid)
+			name = UnitName(unitid)
+			if name and class and self:IsInGroup(name) and self.main_frame.trackers[name] then
+				-- check distance
+				if CheckInteractDistance(unitid, 3) then
+					self.main_frame.trackers[name]:SetAlpha(1)
+				else
+					self.main_frame.trackers[name]:SetAlpha(0.5)
+				end
+				
+				-- check if is alive and connected
+				if UnitIsConnected(unitid) then
+					if UnitIsDeadOrGhost(unitid) then
+						self.main_frame.trackers[name].text:SetTextColor(RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
+					else
+						self.main_frame.trackers[name].text:SetTextColor(RAID_CLASS_COLORS[class].r, RAID_CLASS_COLORS[class].g, RAID_CLASS_COLORS[class].b)
+					end
+				else
+					self.main_frame.trackers[name].text:SetTextColor(0.5, 0.5, 0.5)
+				end
+			end
+		end
+	elseif GetNumPartyMembers() > 0 then
+		for i=1, GetNumPartyMembers() do
+			unitid = 'party'..i
+			_, class = UnitClass(unitid)
+			name = UnitName(unitid)
+			if name and class and self:IsInGroup(name) and self.main_frame.trackers[name] then
+				-- check distance
+				if CheckInteractDistance(unitid, 3) then
+					self.main_frame.trackers[name]:SetAlpha(1)
+				else
+					self.main_frame.trackers[name]:SetAlpha(0.5)
+				end
+				
+				-- check if is alive and connected
+				if UnitIsConnected(unitid) then
+					if UnitIsDeadOrGhost(unitid) then
+						self.main_frame.trackers[name].text:SetTextColor(RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
+					else
+						self.main_frame.trackers[name].text:SetTextColor(RAID_CLASS_COLORS[class].r, RAID_CLASS_COLORS[class].g, RAID_CLASS_COLORS[class].b)
+					end
+				else
+					self.main_frame.trackers[name].text:SetTextColor(0.5, 0.5, 0.5)
+				end
+			end
+		end
+	end
+end
+
 function addon:CreateGUI()
 	local main_frame = CreateFrame('Frame', nil, UIParent)
 	self.main_frame = main_frame
@@ -569,6 +651,9 @@ function addon:CreateGUI()
 		WhoKicksNowOptions.x = x
 		WhoKicksNowOptions.y = y
 		self:print(format('saving frame position [%s] %f, %f', point, x, y), 1)
+	end)
+	main_frame:SetScript('OnUpdate', function()
+		self:UpdateWorldStatus()
 	end)
 	main_frame.trackers = {}
 	main_frame.trackersCount = 0
@@ -774,11 +859,14 @@ function addon:ADDON_LOADED()
 				self:PopulateSpells(true)
 				self:RegisterEvent('PARTY_MEMBERS_CHANGED')
 				self:RegisterEvent('RAID_ROSTER_UPDATE')
+				self:RegisterCombatEvents()
 				self:HandlePlayerChange()
 				self.main_frame:Show()
 				self:print('Enabling AddOn')
 			else
 				self:HandlePlayerChange()
+				self:UnregisterCombatEvents()
+				self:ResetCooldowns()
 				self.main_frame:Hide()
 				self:UnregisterEvent('PARTY_MEMBERS_CHANGED')
 				self:UnregisterEvent('RAID_ROSTER_UPDATE')
@@ -1167,10 +1255,10 @@ do
 			self.inGroup = false
 		end
 		
-		if getn(self.groupMembers) == getn(players) then
+		--[[if getn(self.groupMembers) == getn(players) then
 			self:print('HandlePlayerChange: nothing important has changed', 1)
 			return
-		end
+		end]]
 		
 		self.groupMembers = players
 		
