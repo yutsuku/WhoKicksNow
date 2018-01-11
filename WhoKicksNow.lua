@@ -5,6 +5,7 @@ local strupper = strupper
 local ceil = ceil
 local strfind = strfind
 local gmatch = string.gfind
+local format = string.format
 local GetTime = GetTime
 local GetNumRaidMembers = GetNumRaidMembers
 local GetNumPartyMembers = GetNumPartyMembers
@@ -36,10 +37,10 @@ local CTL = ChatThrottleLib
 local party, raid = {},{}
 do
 	for i=1,MAX_RAID_MEMBERS do
-		raid[i] = string.format("raid%d",i)
+		raid[i] = format("raid%d",i)
 	end
 	for i=1,MAX_PARTY_MEMBERS do
-		party[i] = string.format("party%d",i)
+		party[i] = format("party%d",i)
 	end
 end
 local me = UnitName('player')
@@ -205,15 +206,15 @@ end
 function addon:print(message, level, headless)
 	if not message or message == '' then return end
 	local chatframe
-	if (SELECTED_CHAT_FRAME) then
-		chatframe = SELECTED_CHAT_FRAME
-	else
-		if not DEFAULT_CHAT_FRAME:IsVisible() then
-			FCF_SelectDockFrame(DEFAULT_CHAT_FRAME)
-		end
-		chatframe = DEFAULT_CHAT_FRAME
-	end
-	if (chatframe) then
+  if (SELECTED_CHAT_FRAME) then
+    chatframe = SELECTED_CHAT_FRAME
+  else
+    if not DEFAULT_CHAT_FRAME:IsVisible() then
+      FCF_SelectDockFrame(DEFAULT_CHAT_FRAME)
+    end
+    chatframe = DEFAULT_CHAT_FRAME
+  end
+  if (chatframe) then
 		if level then
 			if level <= debug_level then
 				if headless then
@@ -302,7 +303,7 @@ do
 end
 
 local messageCache = setmetatable({},{__index = function(t,k)
-	local v = string.format("%s;%s;%s;",PREFIX,addon.version,k)
+	local v = format("%s;%s;%s;",PREFIX,addon.version,k)
 	rawset(t,k,v)
 	return v
 end})
@@ -851,6 +852,12 @@ function addon:VARIABLES_LOADED()
 	end)
 	self.SpellWatcher.spells = {}
 	
+	local help = {
+		'/whokicks pause (pause timers)',
+		'/whokicks unlock (unlock trackers)',
+		'/whokicks reset (reset configuration)',
+		'/whokicks or /wk (enable or disable)'
+	}
 	SLASH_WHOKICKSNOW1, SLASH_WHOKICKSNOW2, SLASH_WHOKICKSNOW3 = '/whokicksnow', '/whokicks', '/wk'
 	function SlashCmdList.WHOKICKSNOW(arg)
 		if arg == 'debug' then
@@ -890,7 +897,13 @@ function addon:VARIABLES_LOADED()
 				dialog:SetWidth(420)
 				dialog.editBox:SetText(self.networkUpdateURL or self.updateURL)
 			end
-		else
+		elseif arg == 'unlock' then
+			self.locked = not self.locked
+			self:LockGUI(self.locked)
+			if not (self.locked) then
+				local show = self.main_frame:IsVisible() and HideUIPanel(self.main_frame) or ShowUIPanel(self.main_frame)
+			end
+		elseif arg == '' then
 			self.enabled = not self.enabled
 			WhoKicksNowOptions.enabled = self.enabled
 			
@@ -910,6 +923,10 @@ function addon:VARIABLES_LOADED()
 				self:UnregisterEvent('PARTY_MEMBERS_CHANGED')
 				self:UnregisterEvent('RAID_ROSTER_UPDATE')
 				self:print('Disabling AddOn')
+			end
+		else
+			for _,line in ipairs(help) do
+				self:print(line)
 			end
 		end
 	end
@@ -1391,6 +1408,9 @@ do
 			self:RegisterCombatEvents()
 		else
 			self:UnregisterCombatEvents()
+		end
+		if self.locked and (not self.inGroup) then
+			self.main_frame:Hide()
 		end
 	end
 end
