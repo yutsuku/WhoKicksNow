@@ -1,9 +1,10 @@
 local _G = getfenv(0)
-local tinsert = tinsert
-local getn = getn
-local strupper = strupper
-local ceil = ceil
-local strfind = strfind
+local tinsert = table.insert
+local getn = table.getn
+local strupper = string.upper
+local ceil = math.ceil
+local floor = math.floor
+local strfind = string.find
 local gmatch = string.gfind
 local format = string.format
 local GetTime = GetTime
@@ -145,18 +146,21 @@ function addon:GetSkillInfo(skill, rank)
 end
 
 function addon:GetAnchorPoint()
-	local UI_Width, UI_Height, width, height, top, right, bottom, left
+	local UI_Width, UI_Height, width, height, top, right, bottom, left, UI_scale, frame_scale
+	UI_scale = UIParent:GetEffectiveScale()
+	frame_scale = self.main_frame:GetEffectiveScale()
 	
-	UI_Width = UIParent:GetWidth()
-	UI_Height = UIParent:GetHeight()
-	width = self.main_frame:GetWidth()
-	height = self.main_frame:GetHeight()
-	top = self.main_frame:GetTop()
-	right = self.main_frame:GetRight()
-	bottom = self.main_frame:GetBottom()
-	left = self.main_frame:GetLeft()
+	UI_Width = floor(UIParent:GetWidth()+0.5) -- UI_ROOT
+	UI_Height = floor(UIParent:GetHeight()+0.5) -- UI_ROOT
+	width = floor(self.main_frame:GetWidth()+0.5) -- UI_ROOT
+	height = floor(self.main_frame:GetHeight()+0.5) -- UI_ROOT
+	-- multiply by effective scale to translate to UI_ROOT values, so comparisons have meaning
+	top = floor((self.main_frame:GetTop()*frame_scale)+0.5) -- Effective Scaled 
+	right = floor((self.main_frame:GetRight()*frame_scale)+0.5) -- Effective Scaled
+	bottom = floor((self.main_frame:GetBottom()*frame_scale)+0.5) -- Effective Scaled
+	left = floor((self.main_frame:GetLeft()*frame_scale)+0.5) -- Effective Scaled
 	
-	if (debug_level > 0) then self:print(format('UI: %f x %f', UIParent:GetWidth(), UIParent:GetHeight() ), 1) end
+	if (debug_level > 0) then self:print(format('UI: %f x %f', UI_Width, UI_Height ), 1) end
 	if (debug_level > 0) then self:print(format('bottom: %f, left: %f, right: %f, top: %f', bottom, left, right, top ), 1) end
 	
 	local is_top, is_right, is_bottom, is_left
@@ -175,19 +179,19 @@ function addon:GetAnchorPoint()
 	if bottom + height/2 < UI_Height/2 then
 		is_bottom = true
 	end
-	
+	-- for use with SetPoint() we must convert back to EffectiveScaled
 	if is_top and is_left then
 		if (debug_level > 0) then self:print(format('Region is TOPLEFT %f, %f', left, top), 1) end
-		return 'TOPLEFT', left, top
+		return 'TOPLEFT', left/frame_scale, top/frame_scale
 	elseif is_top and is_right then
 		if (debug_level > 0) then self:print(format('Region is TOPRIGHT %f, %f', right, top), 1) end
-		return 'TOPRIGHT', right, top
+		return 'TOPRIGHT', right/frame_scale, top/frame_scale
 	elseif is_bottom and is_left then
 		if (debug_level > 0) then self:print(format('Region is BOTTOMLEFT %f, %f', left, bottom), 1) end
-		return 'BOTTOMLEFT', left, bottom
+		return 'BOTTOMLEFT', left/frame_scale, bottom/frame_scale
 	elseif is_bottom and is_right then
 		if (debug_level > 0) then self:print(format('Region is BOTTOMRIGHT %f, %f', right, bottom), 1) end
-		return 'BOTTOMRIGHT', right, bottom
+		return 'BOTTOMRIGHT', right/frame_scale, bottom/frame_scale
 	else
 		if (debug_level > 0) then self:print('Unable to assume region', 1) end
 		return 'CENTER', 0, 0
@@ -685,7 +689,7 @@ function addon:CreateGUI()
 	main_frame:SetScript('OnDragStop', function()
 		this:StopMovingOrSizing()
 		--local point, x, y = self:GetAnchorPoint()
-		local point, _, _, x, y = this:GetPoint()
+		local point, _, _, x, y = this:GetPoint() -- pre 2.0 the anchor is always TOPLEFT
 		WhoKicksNowOptions.point = point
 		WhoKicksNowOptions.x = x
 		WhoKicksNowOptions.y = y
@@ -1411,6 +1415,8 @@ do
 		end
 		if self.locked and (not self.inGroup) then
 			self.main_frame:Hide()
+		else
+			self.main_frame:Show()
 		end
 	end
 end
