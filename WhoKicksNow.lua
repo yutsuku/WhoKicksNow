@@ -1,9 +1,12 @@
-local tinsert = tinsert
-local getn = getn
-local strupper = strupper
-local ceil = ceil
-local strfind = strfind
+local _G = getfenv(0)
+local tinsert = table.insert
+local getn = table.getn
+local strupper = string.upper
+local ceil = math.ceil
+local floor = math.floor
+local strfind = string.find
 local gmatch = string.gfind
+local format = string.format
 local GetTime = GetTime
 local GetNumRaidMembers = GetNumRaidMembers
 local GetNumPartyMembers = GetNumPartyMembers
@@ -26,8 +29,22 @@ local ICON_HEIGHT = 20
 
 local debug_level = 0
 local NETWORK = true
+local PREFIX = 'WhoKicksNow'
 local PAUSE = false
+local __WKN,__WKN_D1,__WKN_D2
 local addon = CreateFrame('Frame')
+local CTL = ChatThrottleLib
+
+local party, raid = {},{}
+do
+	for i=1,MAX_RAID_MEMBERS do
+		raid[i] = format("raid%d",i)
+	end
+	for i=1,MAX_PARTY_MEMBERS do
+		party[i] = format("party%d",i)
+	end
+end
+local me = UnitName('player')
 
 addon:SetScript('OnEvent', function()
 	this[event](this)
@@ -45,11 +62,17 @@ local SKILLS = {
 	{name='Cheap Shot', useHook=true, cooldown=1, texture=[[Interface\Icons\Ability_CheapShot]]},
 	{name='Kidney Shot', cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
 	{name='Gouge', cooldown=10, texture=[[Interface\Icons\Ability_Gouge]]},
+	{name='Pummel', cooldown=10, texture=[[Interface\Icons\INV_Gauntlets_04]]},
+	{name='Shield Bash', cooldown=12, texture=[[Interface\Icons\Ability_Warrior_ShieldBash]]},
 }
 
+local CLASSES = {
+	ROGUE = true,
+	WARRIOR = true,
+}
 local SPELLBOOK = {}
 
-addon:RegisterEvent('ADDON_LOADED')
+addon:RegisterEvent('VARIABLES_LOADED')
 addon:RegisterEvent('PLAYER_ENTERING_WORLD')
 addon:RegisterEvent('PLAYER_LEAVING_WORLD')
 
@@ -123,19 +146,22 @@ function addon:GetSkillInfo(skill, rank)
 end
 
 function addon:GetAnchorPoint()
-	local UI_Width, UI_Height, width, height, top, right, bottom, left
+	local UI_Width, UI_Height, width, height, top, right, bottom, left, UI_scale, frame_scale
+	UI_scale = UIParent:GetEffectiveScale()
+	frame_scale = self.main_frame:GetEffectiveScale()
 	
-	UI_Width = UIParent:GetWidth()
-	UI_Height = UIParent:GetHeight()
-	width = self.main_frame:GetWidth()
-	height = self.main_frame:GetHeight()
-	top = self.main_frame:GetTop()
-	right = self.main_frame:GetRight()
-	bottom = self.main_frame:GetBottom()
-	left = self.main_frame:GetLeft()
+	UI_Width = floor(UIParent:GetWidth()+0.5) -- UI_ROOT
+	UI_Height = floor(UIParent:GetHeight()+0.5) -- UI_ROOT
+	width = floor(self.main_frame:GetWidth()+0.5) -- UI_ROOT
+	height = floor(self.main_frame:GetHeight()+0.5) -- UI_ROOT
+	-- multiply by effective scale to translate to UI_ROOT values, so comparisons have meaning
+	top = floor((self.main_frame:GetTop()*frame_scale)+0.5) -- Effective Scaled 
+	right = floor((self.main_frame:GetRight()*frame_scale)+0.5) -- Effective Scaled
+	bottom = floor((self.main_frame:GetBottom()*frame_scale)+0.5) -- Effective Scaled
+	left = floor((self.main_frame:GetLeft()*frame_scale)+0.5) -- Effective Scaled
 	
-	self:print(format('UI: %f x %f', UIParent:GetWidth(), UIParent:GetHeight() ), 1)
-	self:print(format('bottom: %f, left: %f, right: %f, top: %f', bottom, left, right, top ), 1)
+	if (debug_level > 0) then self:print(format('UI: %f x %f', UI_Width, UI_Height ), 1) end
+	if (debug_level > 0) then self:print(format('bottom: %f, left: %f, right: %f, top: %f', bottom, left, right, top ), 1) end
 	
 	local is_top, is_right, is_bottom, is_left
 	
@@ -153,21 +179,21 @@ function addon:GetAnchorPoint()
 	if bottom + height/2 < UI_Height/2 then
 		is_bottom = true
 	end
-	
+	-- for use with SetPoint() we must convert back to EffectiveScaled
 	if is_top and is_left then
-		self:print(format('Region is TOPLEFT %f, %f', left, top), 1)
-		return 'TOPLEFT', left, top
+		if (debug_level > 0) then self:print(format('Region is TOPLEFT %f, %f', left, top), 1) end
+		return 'TOPLEFT', left/frame_scale, top/frame_scale
 	elseif is_top and is_right then
-		self:print(format('Region is TOPRIGHT %f, %f', right, top), 1)
-		return 'TOPRIGHT', right, top
+		if (debug_level > 0) then self:print(format('Region is TOPRIGHT %f, %f', right, top), 1) end
+		return 'TOPRIGHT', right/frame_scale, top/frame_scale
 	elseif is_bottom and is_left then
-		self:print(format('Region is BOTTOMLEFT %f, %f', left, bottom), 1)
-		return 'BOTTOMLEFT', left, bottom
+		if (debug_level > 0) then self:print(format('Region is BOTTOMLEFT %f, %f', left, bottom), 1) end
+		return 'BOTTOMLEFT', left/frame_scale, bottom/frame_scale
 	elseif is_bottom and is_right then
-		self:print(format('Region is BOTTOMRIGHT %f, %f', right, bottom), 1)
-		return 'BOTTOMRIGHT', right, bottom
+		if (debug_level > 0) then self:print(format('Region is BOTTOMRIGHT %f, %f', right, bottom), 1) end
+		return 'BOTTOMRIGHT', right/frame_scale, bottom/frame_scale
 	else
-		self:print('Unable to assume region', 1)
+		if (debug_level > 0) then self:print('Unable to assume region', 1) end
 		return 'CENTER', 0, 0
 	end
 end
@@ -183,59 +209,70 @@ end
 
 function addon:print(message, level, headless)
 	if not message or message == '' then return end
-	if level then
-		if level <= debug_level then
+	local chatframe
+  if (SELECTED_CHAT_FRAME) then
+    chatframe = SELECTED_CHAT_FRAME
+  else
+    if not DEFAULT_CHAT_FRAME:IsVisible() then
+      FCF_SelectDockFrame(DEFAULT_CHAT_FRAME)
+    end
+    chatframe = DEFAULT_CHAT_FRAME
+  end
+  if (chatframe) then
+		if level then
+			if level <= debug_level then
+				if headless then
+					chatframe:AddMessage(message, 0.53, 0.69, 0.19)
+				else
+					chatframe:AddMessage('[WKN]: ' .. message, 0.53, 0.69, 0.19)
+				end
+			end
+		else
 			if headless then
-				ChatFrame1:AddMessage(message, 0.53, 0.69, 0.19)
+				chatframe:AddMessage(message)
 			else
-				ChatFrame1:AddMessage('[WKN]: ' .. message, 0.53, 0.69, 0.19)
+				chatframe:AddMessage('[WKN]: ' .. message, 1.0, 0.61, 0)
 			end
 		end
-	else
-		if headless then
-			ChatFrame1:AddMessage(message)
-		else
-			ChatFrame1:AddMessage('[WKN]: ' .. message, 1.0, 0.61, 0)
-		end
-	end
+  end 
 end
 
 do
 	local ignoreUpdate
 	function addon:CHAT_MSG_ADDON()
-		if arg1 ~= 'WhoKicksNow' then
+		if arg1 ~= PREFIX then
 			return
 		end
 		
-		self:print(format('--RAW [%s] --\n%s\n--ENDRAW--', arg4, arg2), 2)
+		if (debug_level > 0) then self:print(format('--RAW [%s] --\n%s\n--ENDRAW--', arg4, arg2), 2) end
 		
 		local msg = {}
 		local len = 0
 		for w in gmatch(arg2, '[^;]+') do
 			len = len + 1
-			self:print(format('[%d] WORD "%s"', len, w), 3)
+			if (debug_level > 0) then self:print(format('[%d] WORD "%s"', len, w), 3) end
 			tinsert(msg, w)
 		end
 		
-		if len == 3 and msg[3] == self.Network.VersionCheck --[[and arg4 ~= UnitName('player')]] then
+		if len == 3 and msg[3] == self.Network.VersionCheck --[[and arg4 ~= me]] then
 			-- received version check message
 			local netversion = tonumber(msg[2])
-			self:print('[NET:CHECK] '..arg4..' v'..netversion, 2)
-			self:NetworkSendUpdate(self.Network.VersionCheckReply)
+			if (debug_level > 0) then self:print('[NET:CHECK] '..arg4..' v'..netversion, 2) end
+			self:NetworkSendUpdate(self.Network.VersionCheckReply, nil, "BULK")
 		end
 		
-		if len == 3 and msg[3] == self.Network.VersionCheckReply and self.netPing --[[and arg4 ~= UnitName('player')]] then
+		if len == 3 and msg[3] == self.Network.VersionCheckReply and self.netPing --[[and arg4 ~= me]] then
 			-- received version check reply message
 			local netversion = tonumber(msg[2])
-			self:print('[NET:REPLY] '..arg4..' v'..netversion, 2)
+			if (debug_level > 0) then self:print('[NET:REPLY] '..arg4..' v'..netversion, 2) end
 			self:NetworkPingReply(arg4, netversion)
 		end
 		
-		if len == 4 and msg[3] == self.Network.Version and arg4 ~= UnitName('player') then
+		if len == 4 and msg[3] == self.Network.Version and arg4 ~= me then
 			-- received version message
 			local netversion = tonumber(msg[2])
 			local url = string.gsub(msg[4], '\124', '\124\124') -- paranoia from the webdev days
-			self:print('[NET] '..arg4..' v'..netversion, 2)
+			if (debug_level > 0) then self:print('[NET] '..arg4..' v'..netversion, 2) end
 			if netversion > tonumber(self.version) and string.find(url, '^.-://') and not ignoreUpdate then -- ensure "PROTOCOL://DATA" format
 				self.networkUpdateURL = url
 				ignoreUpdate = true
@@ -245,7 +282,7 @@ do
 			end
 		end
 		
-		if len == 4 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
+		if len == 4 and msg[3] == self.Network.Cooldown and arg4 ~= me then
 			-- received cooldown message
 			local skillInfo = self:GetSkillInfo(msg[4])
 			if not skillInfo then
@@ -253,10 +290,10 @@ do
 			end
 			
 			self:ApplyCooldown(arg4, skillInfo, false)
-			self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name, 1)
+			if (debug_level > 0) then self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name, 1) end
 		end
 		
-		if len == 5 and msg[3] == self.Network.Cooldown and arg4 ~= UnitName('player') then
+		if len == 5 and msg[3] == self.Network.Cooldown and arg4 ~= me then
 			-- received cooldown message (miss)
 			local skillInfo = self:GetSkillInfo(msg[4])
 			if not skillInfo then
@@ -264,44 +301,47 @@ do
 			end
 			
 			self:ApplyCooldown(arg4, skillInfo, true)
-			self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name..' (miss)', 1)
+			if (debug_level > 0) then self:print('[NET] Showing cooldowns for '..arg4..' due to '..skillInfo.name..' (miss)', 1) end
 		end
 	end
 end
 
-function addon:NetworkSendUpdate(message, guild)
+local messageCache = setmetatable({},{__index = function(t,k)
+	local v = format("%s;%s;%s;",PREFIX,addon.version,k)
+	rawset(t,k,v)
+	return v
+end})
+function addon:NetworkSendUpdate(message, guild, prio)
 	if not NETWORK then return end
 	
-	local msg = ''
-	msg = msg .. 'WhoKicksNow;'
-	msg = msg .. self.version .. ';'
-	msg = msg .. message .. ';'
+	local msg = messageCache[message]
+	if not (prio) then prio = "NORMAL" end
 	
 	if GetNumRaidMembers() > 0 then
-		self:print('[NET] OUT RAID', 3)
-		SendAddonMessage('WhoKicksNow', msg, 'RAID')
+		if (debug_level > 0) then self:print('[NET] OUT RAID', 3) end
+		CTL:SendAddonMessage(prio, PREFIX, msg, 'RAID')
 	elseif GetNumPartyMembers() > 0 then
-		self:print('[NET] OUT PARTY', 3)
-		SendAddonMessage('WhoKicksNow', msg, 'PARTY')
+		if (debug_level > 0) then self:print('[NET] OUT PARTY', 3) end
+		CTL:SendAddonMessage(prio, PREFIX, msg, 'PARTY')
 	end
 	
 	if guild and IsInGuild() then
-		self:print('[NET] OUT GUILD', 3)
-		SendAddonMessage('WhoKicksNow', msg, 'PARTY')
+		if (debug_level > 0) then self:print('[NET] OUT GUILD', 3) end
+		CTL:SendAddonMessage(prio, PREFIX, msg, 'GUILD')
 	end
 end
 
 function addon:NetworkPing(ready)
-	self:print('[NetworkPing] '..tostring(ready), 1)
+	if (debug_level > 0) then self:print('[NetworkPing] '..tostring(ready), 1) end
 	if ready then
-		self:print('[NetworkPing] version check ready', 3)
+		if (debug_level > 0) then self:print('[NetworkPing] version check ready', 3) end
 		for k,frame in pairs(self.main_frame.trackers) do
 			frame.net:Hide()
 			frame.net.status:SetVertexColor(1, 1, 1)
 			frame.net.status:Hide()
 		end
 	else
-		self:print('[NetworkPing] requesting version check', 3)
+		if (debug_level > 0) then self:print('[NetworkPing] requesting version check', 3) end
 		for k,frame in pairs(self.main_frame.trackers) do
 			frame.net.status:SetVertexColor(1, 1, 1)
 			frame.net.status:Hide()
@@ -309,7 +349,7 @@ function addon:NetworkPing(ready)
 		end
 		self.netPing = true
 		self.main_frame.netPingFrame:Show()
-		self:NetworkSendUpdate(self.Network.VersionCheck)
+		self:NetworkSendUpdate(self.Network.VersionCheck, nil, "BULK")
 	end
 end
 
@@ -348,7 +388,7 @@ function addon:PopulateSpells(reset)
 		end
 	end
 	
-	self:print('PopulateSpells: '..getn(SPELLBOOK)..' spells ready', 2)
+	if (debug_level > 0) then self:print('PopulateSpells: '..getn(SPELLBOOK)..' spells ready', 2) end
 	
 end
 
@@ -424,7 +464,7 @@ function addon:CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS() -- can occur OUTSIDE PAR
 	end
 
 	self:ApplyCooldown(name, skillInfo, true)
-	self:print('[DAMAGESHIELDS_ON_OTHERS] Showing cooldowns for '..name..' due to missed '..skillInfo.name, 1)
+	if (debug_level > 0) then self:print('[DAMAGESHIELDS_ON_OTHERS] Showing cooldowns for '..name..' due to missed '..skillInfo.name, 1) end
 end
 
 function addon:CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF()
@@ -437,16 +477,16 @@ function addon:CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF()
 		return
 	end
 
-	self:ApplyCooldown(UnitName('player'), skillInfo, true)
+	self:ApplyCooldown(me, skillInfo, true)
 	for skill, spellData in pairs(self.SpellWatcher.spells) do
 		self.SpellWatcher.spells[skill].fail = true
 	end
-	self:NetworkSendUpdate(format('%s;%s;%s', self.Network.Cooldown, skillInfo.name, 1))
-	self:print('[DAMAGESHIELDS_ON_SELF] Showing cooldowns for you due to missed '..skill, 1)
+	self:NetworkSendUpdate(format('%s;%s;%s', self.Network.Cooldown, skillInfo.name, 1), nil, "ALERT")
+	if (debug_level > 0) then self:print('[DAMAGESHIELDS_ON_SELF] Showing cooldowns for you due to missed '..skill, 1) end
 end
 
 function addon:CHAT_MSG_SPELL_SELF_DAMAGE()
-	self:print('CHAT_MSG_SPELL_SELF_DAMAGE', 1)
+	if (debug_level > 0) then self:print('CHAT_MSG_SPELL_SELF_DAMAGE', 1) end
 	-- "Your Kick hits Earthborer for 8."
 	local _,_, skill = strfind(arg1, '^Your (.-) .- .+')
 	local skillInfo = self:GetSkillInfo(skill)
@@ -454,12 +494,12 @@ function addon:CHAT_MSG_SPELL_SELF_DAMAGE()
 		return
 	end
 
-	self:ApplyCooldown(UnitName('player'), skillInfo, false)
-	self:print('[SELF_DAMAGE] Showing cooldowns for you due to '..skill, 1)
+	self:ApplyCooldown(me, skillInfo, false)
+	if (debug_level > 0) then self:print('[SELF_DAMAGE] Showing cooldowns for you due to '..skill, 1) end
 end
 
 function addon:CHAT_MSG_SPELL_PARTY_DAMAGE()
-	self:print('CHAT_MSG_SPELL_PARTY_DAMAGE', 1)
+	if (debug_level > 0) then self:print('CHAT_MSG_SPELL_PARTY_DAMAGE', 1) end
 	-- "Roguea's Kick hits Earthborer for 4. (7 blocked)"
 	local _,_, name, skill = strfind(arg1, '^(.-)\'s (.-) .- .+')
 	local skillInfo = self:GetSkillInfo(skill)
@@ -468,7 +508,7 @@ function addon:CHAT_MSG_SPELL_PARTY_DAMAGE()
 	end
 	
 	self:ApplyCooldown(name, skillInfo, false)
-	self:print('[PARTY_DAMAGE] Showing cooldowns for '..name..' due to '..skillInfo.name, 1)
+	if (debug_level > 0) then self:print('[PARTY_DAMAGE] Showing cooldowns for '..name..' due to '..skillInfo.name, 1) end
 end
 
 function addon:CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE() -- fucking raid groups, can occur OUTSIDE PARTY/RAID TOO
@@ -479,25 +519,25 @@ function addon:CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE() -- fucking raid groups, ca
 	end
 	
 	self:ApplyCooldown(name, skillInfo, false)
-	self:print('[FRIENDLYPLAYER_DAMAGE] Showing cooldowns for '..name..' due to '..skillInfo.name, 1)
+	if (debug_level > 0) then self:print('[FRIENDLYPLAYER_DAMAGE] Showing cooldowns for '..name..' due to '..skillInfo.name, 1) end
 end
 
 do
 	local oncd = {}
 	function addon:SPELL_UPDATE_COOLDOWN() -- lag-independed way to detect kidney shot, hopefully
-		self:print('SPELL_UPDATE_COOLDOWN', 1)
+		if (debug_level > 0) then self:print('SPELL_UPDATE_COOLDOWN', 1) end
 		for i=1, getn(SPELLBOOK) do
 			local t, cd = GetSpellCooldown(SPELLBOOK[i].id, "spell")
-			self:print(SPELLBOOK[i].name..' cd '..cd, 2)
-			if cd > 1 then
+			if (debug_level > 0) then self:print(SPELLBOOK[i].name..' cd '..cd, 2) end
+			if cd > 1.5 then
 				if not oncd[SPELLBOOK[i].id] or oncd[SPELLBOOK[i].id] < t then
 				
 					oncd[SPELLBOOK[i].id] = t
 					local skillInfo = self:GetSkillInfo(SPELLBOOK[i].name)
 					
-					self:ApplyCooldown(UnitName('player'), skillInfo, false)
-					self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
-					self:print('[SPELL_UPDATE_COOLDOWN] Showing cooldowns for you due to '..skillInfo.name, 1)
+					self:ApplyCooldown(me, skillInfo, false)
+					self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name), nil, "NORMAL")
+					if (debug_level > 0) then self:print('[SPELL_UPDATE_COOLDOWN] Showing cooldowns for you due to '..skillInfo.name, 1) end
 				end
 			end
 		end
@@ -522,22 +562,22 @@ function addon:SetHooks()
 	self.RunMacro = RunMacro
 	
 	function RunMacro(arg)
-		self:print('[SpellWatcher|Macro] '..arg, 2)
+		if (debug_level > 0) then self:print('[SpellWatcher|Macro] '..arg, 2) end
 		self.RunMacro(arg)
 	end
 	
 	function CastSpellByName(msg)
 		local skillInfo = self:GetSkillInfo(msg)
-		self:print('[SpellWatcher|ByName] '..msg, 2)
+		if (debug_level > 0) then self:print('[SpellWatcher|ByName] '..msg, 2) end
 		if skillInfo and skillInfo.useHook then
-			self:print('[SpellWatcher|ByName] updating '..msg, 1)
+			if (debug_level > 0) then self:print('[SpellWatcher|ByName] updating '..msg, 1) end
 			self.SpellWatcher.spells[msg] = { t = GetTime() }
 		end
 		self.CastSpellByName(msg)
 	end
 	
 	function CastSpell(id, bookType)
-		self:print('[SpellWatcher|id] '..id..', bookType: '..bookType, 1)
+		if (debug_level > 0) then self:print('[SpellWatcher|id] '..id..', bookType: '..bookType, 1) end
 		self.CastSpell(id, bookType)
 	end
 	
@@ -551,9 +591,9 @@ function addon:SetHooks()
 			self.UseActionTooltip:SetAction(slot)
 			local spellName = self.UseActionTooltipText:GetText()
 			local skillInfo = self:GetSkillInfo(spellName)
-			self:print('[UseAction]  '..tostring(spellName), 1)
+			if (debug_level > 0) then self:print('[UseAction]  '..tostring(spellName), 1) end
 			if skillInfo and skillInfo.useHook then
-				self:print('[SpellWatcher|Slot] updating '..spellName, 1)
+				if (debug_level > 0) then self:print('[SpellWatcher|Slot] updating '..spellName, 1) end
 				self.SpellWatcher.spells[spellName] = { t = GetTime() }
 			end
 		end
@@ -566,9 +606,11 @@ end
 function addon:UpdateWorldStatus()
 	local name, _, class, unitid
 	
-	if GetNumRaidMembers() > 0 then
-		for i=1, GetNumRaidMembers() do
-			unitid = 'raid'..i
+	local numRaidMembers = GetNumRaidMembers()
+	local numPartyMembers = GetNumPartyMembers()
+	if numRaidMembers > 0 then
+		for i=1, numRaidMembers do
+			unitid = raid[i]
 			_, class = UnitClass(unitid)
 			name = UnitName(unitid)
 			if name and class and self:IsInGroup(name) and self.main_frame.trackers[name] then
@@ -591,9 +633,9 @@ function addon:UpdateWorldStatus()
 				end
 			end
 		end
-	elseif GetNumPartyMembers() > 0 then
-		for i=1, GetNumPartyMembers() do
-			unitid = 'party'..i
+	elseif numPartyMembers > 0 then
+		for i=1, numPartyMembers do
+			unitid = party[i]
 			_, class = UnitClass(unitid)
 			name = UnitName(unitid)
 			if name and class and self:IsInGroup(name) and self.main_frame.trackers[name] then
@@ -622,7 +664,7 @@ end
 function addon:CreateGUI()
 	local main_frame = CreateFrame('Frame', nil, UIParent)
 	self.main_frame = main_frame
-	self:print(format('loading frame position [%s] %f, %f', WhoKicksNowOptions.point, WhoKicksNowOptions.x, WhoKicksNowOptions.y), 1)
+	if (debug_level > 0) then self:print(format('loading frame position [%s] %f, %f', WhoKicksNowOptions.point, WhoKicksNowOptions.x, WhoKicksNowOptions.y), 1) end
 	main_frame:SetPoint(WhoKicksNowOptions.point, WhoKicksNowOptions.x, WhoKicksNowOptions.y)
 	main_frame:SetWidth(MAINBAR_WIDTH)
 	main_frame:SetHeight(MAINBAR_HEIGHT)
@@ -634,7 +676,7 @@ function addon:CreateGUI()
 		edgeSize = 16,
 		insets = { left = 4, right = 4, top = 4, bottom = 4 }
 	})
-    main_frame:SetBackdropColor(0, 0, 0, .6)
+  main_frame:SetBackdropColor(0, 0, 0, .6)
 	main_frame:SetMovable(true)
 	main_frame:SetClampedToScreen(true)
 	main_frame:SetToplevel(true)
@@ -646,11 +688,12 @@ function addon:CreateGUI()
 	end)
 	main_frame:SetScript('OnDragStop', function()
 		this:StopMovingOrSizing()
-		local point, x, y = self:GetAnchorPoint()
+		--local point, x, y = self:GetAnchorPoint()
+		local point, _, _, x, y = this:GetPoint() -- pre 2.0 the anchor is always TOPLEFT
 		WhoKicksNowOptions.point = point
 		WhoKicksNowOptions.x = x
 		WhoKicksNowOptions.y = y
-		self:print(format('saving frame position [%s] %f, %f', point, x, y), 1)
+		if (debug_level > 0) then self:print(format('saving frame position [%s] %f, %f', point, x, y), 1) end
 	end)
 	main_frame:SetScript('OnUpdate', function()
 		self:UpdateWorldStatus()
@@ -708,7 +751,7 @@ function addon:CreateGUI()
 		if this.elapsed > 5 then
 			self.netPing = false
 			this:Hide()
-			self:print('[netPingFrame] finished in '..this.elapsed, 3)
+			if (debug_level > 0) then self:print('[netPingFrame] finished in '..this.elapsed, 3) end
 			self:NetworkPing(true)
 		end
 	end)
@@ -725,20 +768,21 @@ function addon:CreateGUI()
 	button_query:SetPushedTexture([[Interface\GossipFrame\PetitionGossipIcon]])
 	
 	button_query:SetScript('OnClick', function()
-		self:print('Clicked query button', 1)
+		if (debug_level > 0) then self:print('Clicked query button', 1) end
 		self:NetworkPing()
 	end)
 	
-	self:print('BUTTON_PING:LOCKED? '..tostring(self.locked), 1)
+	if (debug_level > 0) then self:print('BUTTON_PING:LOCKED? '..tostring(self.locked), 1) end
 	if self.locked then
 		button_query:Hide()
 	end
+	self:LockGUI(self.locked)
 end
 
-function addon:ADDON_LOADED()
-	if arg1 ~= 'WhoKicksNow' then
+function addon:VARIABLES_LOADED()
+	--[[if arg1 ~= 'WhoKicksNow' then
 		return
-	end
+	end]]
 	if not WhoKicksNowOptions then
 		self:ResetConfig()
 		self:print('config created')
@@ -766,10 +810,10 @@ function addon:ADDON_LOADED()
 		if arg8 then s = s..' arg8: '..arg8 end
 		if arg9 then s = s..' arg9: '..arg9 end
 		if ( strsub(event, 1, 8) == "CHAT_MSG" ) then
-			self:print(event, 0)
+			if (debug_level > 0) then self:print(event, 0) end
 			self:print(s, 0, true)
 		else
-			self:print(event, 1)
+			if (debug_level > 0) then self:print(event, 1) end
 			self:print(s, 1, true)
 		end
 	end)]]
@@ -785,7 +829,7 @@ function addon:ADDON_LOADED()
 				if spellData.fail or not spellData.cast then
 					-- cast failed
 					self.SpellWatcher.spells[skill] = nil
-					self:print('[SpellWatcher] '..skill..' failed ('..spellData.t..', now: '..now..')', 1)
+					if (debug_level > 0) then self:print('[SpellWatcher] '..skill..' failed ('..spellData.t..', now: '..now..')', 1) end
 					break
 				end
 				-- cast was successful
@@ -794,9 +838,9 @@ function addon:ADDON_LOADED()
 					return
 				end
 				
-				self:ApplyCooldown(UnitName('player'), skillInfo, false)
-				self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name))
-				self:print('[SpellWatcher] Showing cooldowns for you due to '..skill..' ('..spellData.t+SPELL_FAIL_TIME..' < '..now..')', 1)
+				self:ApplyCooldown(me, skillInfo, false)
+				self:NetworkSendUpdate(format('%s;%s', self.Network.Cooldown, skillInfo.name), nil, "NORMAL")
+				if (debug_level > 0) then self:print('[SpellWatcher] Showing cooldowns for you due to '..skill..' ('..spellData.t+SPELL_FAIL_TIME..' < '..now..')', 1) end
 				self.SpellWatcher.spells[skill] = nil
 			end
 		end
@@ -812,6 +856,12 @@ function addon:ADDON_LOADED()
 	end)
 	self.SpellWatcher.spells = {}
 	
+	local help = {
+		'/whokicks pause (pause timers)',
+		'/whokicks unlock (unlock trackers)',
+		'/whokicks reset (reset configuration)',
+		'/whokicks or /wk (enable or disable)'
+	}
 	SLASH_WHOKICKSNOW1, SLASH_WHOKICKSNOW2, SLASH_WHOKICKSNOW3 = '/whokicksnow', '/whokicks', '/wk'
 	function SlashCmdList.WHOKICKSNOW(arg)
 		if arg == 'debug' then
@@ -829,7 +879,7 @@ function addon:ADDON_LOADED()
 				PAUSE = true
 				__WKN = self
 				__WKN_D1 = self.SpellWatcher.spells
-				__WKN_D2 = self.main_frame.trackers[UnitName('player')].cooldowns.t
+				__WKN_D2 = self.main_frame.trackers[me].cooldowns.t
 				self:print('Pausing timers')
 			end
 		elseif arg == 'indexes' then
@@ -849,9 +899,15 @@ function addon:ADDON_LOADED()
 			local dialog = StaticPopup_Show('WKN_UPDATEPOPUP')
 			if dialog then
 				dialog:SetWidth(420)
-				dialog.editBox:SetText(self.networkUpdateURL)
+				dialog.editBox:SetText(self.networkUpdateURL or self.updateURL)
 			end
-		else
+		elseif arg == 'unlock' then
+			self.locked = not self.locked
+			self:LockGUI(self.locked)
+			if not (self.locked) then
+				local show = self.main_frame:IsVisible() and HideUIPanel(self.main_frame) or ShowUIPanel(self.main_frame)
+			end
+		elseif arg == '' then
 			self.enabled = not self.enabled
 			WhoKicksNowOptions.enabled = self.enabled
 			
@@ -872,6 +928,10 @@ function addon:ADDON_LOADED()
 				self:UnregisterEvent('RAID_ROSTER_UPDATE')
 				self:print('Disabling AddOn')
 			end
+		else
+			for _,line in ipairs(help) do
+				self:print(line)
+			end
 		end
 	end
 	
@@ -883,7 +943,7 @@ function addon:ADDON_LOADED()
 		self:RegisterEvent('PARTY_MEMBERS_CHANGED')
 		self:RegisterEvent('RAID_ROSTER_UPDATE')
 		self:HandlePlayerChange()
-		self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL, true)
+		self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL, true, "BULK")
 	else
 		self.main_frame:Hide()
 	end
@@ -906,17 +966,17 @@ function addon:PLAYER_LEAVING_WORLD()
 end
 
 function addon:RAID_ROSTER_UPDATE()
-	self:print('RAID_ROSTER_UPDATE', 1)
+	if (debug_level > 0) then self:print('RAID_ROSTER_UPDATE', 1) end
 	self:HandlePlayerChange()
 end
 
 function addon:PARTY_MEMBERS_CHANGED()
-	self:print('PARTY_MEMBERS_CHANGED', 1)
+	if (debug_level > 0) then self:print('PARTY_MEMBERS_CHANGED', 1) end
 	self:HandlePlayerChange()
 end
 
 function addon:LockGUI(locked)
-	self:print('LockGUI: '..tostring(locked), 1)
+	if (debug_level > 0) then self:print('LockGUI: '..tostring(locked), 1) end
 	if locked then
 		self.main_frame.button_lock:SetNormalTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked]])
 		self.main_frame.button_lock:SetHighlightTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-highlight]], 'ADD')
@@ -924,7 +984,7 @@ function addon:LockGUI(locked)
 		self.main_frame.button_lock:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-pushed]])
 		
 		for name, tracker in pairs(self.main_frame.trackers) do
-			self:print('[tracker] (locked)', 1)
+			if (debug_level > 0) then self:print('[tracker] (locked)', 1) end
 			tracker:SetWidth(BAR_WIDTH_LOCKED)
 			tracker.button_up:Hide()
 			tracker.button_down:Hide()
@@ -940,7 +1000,7 @@ function addon:LockGUI(locked)
 		self.main_frame.button_lock:SetPushedTexture([[Interface\AddOns\WhoKicksNow\textures\padlock-locked-pushed]])
 		
 		for name, tracker in pairs(self.main_frame.trackers) do
-			self:print('[tracker] (unlocked)', 1)
+			if (debug_level > 0) then self:print('[tracker] (unlocked)', 1) end
 			tracker:SetWidth(BAR_WIDTH)
 			tracker.button_up:Show()
 			tracker.button_down:Show()
@@ -954,8 +1014,14 @@ end
 
 do
 	local frameid = 1
+	local t = {
+		{name='Kidney Shot', remaining=20, cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
+		{name='Kick', remaining=10, miss=true, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
+		{name='Pummel', remaining=10, miss=true, cooldown=10, texture=[[Interface\Icons\INV_Gauntlets_04]]},
+		{name='Shield Bash', remaining=12, miss=true, cooldown=12, texture=[[Interface\Icons\Ability_Warrior_ShieldBash]]},
+	}
 	function addon:CreateTracker(name, class)
-		self:print('creating frame for '..name..', '..class, 1)
+		if (debug_level > 0) then self:print('creating frame for '..name..', '..class, 1) end
 
 		if self.main_frame.trackers[name] then
 			return self.main_frame.trackers[name]
@@ -981,10 +1047,7 @@ do
 			if arg1 == 'LeftButton' then
 				TargetByName(this.text:GetText(), 1)
 			elseif arg1 == 'RightButton' then
-				this.cooldowns.t = {
-					{name='Kidney Shot', remaining=20, cooldown=20, texture=[[Interface\Icons\Ability_Rogue_KidneyShot]]},
-					{name='Kick', remaining=10, miss=true, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
-				}
+				this.cooldowns.t = t
 				this.cooldowns:Show()
 				self:print('Test mode for '..this.text:GetText())
 			end
@@ -1015,7 +1078,7 @@ do
 			
 			local tracker_current, tracker_previous, tracker_next
 			
-			self:print('[Up] '..id..' => '..id_previous, 1)
+			if (debug_level > 0) then self:print('[Up] '..id..' => '..id_previous, 1) end
 			
 			for name, tracker in pairs(self.main_frame.trackers) do
 				if tracker.sortIndex == id_next then
@@ -1072,7 +1135,7 @@ do
 			
 			local tracker_current, tracker_previous, tracker_next
 			
-			self:print('[Down] '..id..' => '..id_next, 1)
+			if (debug_level > 0) then self:print('[Down] '..id..' => '..id_next, 1) end
 			
 			for name, tracker in pairs(self.main_frame.trackers) do
 				if tracker.sortIndex == id_next then
@@ -1149,11 +1212,11 @@ do
 		end
 		
 		cooldowns.t = {}
-		--[[
-			{
-				{name='Kick', remaining=2, miss=false, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
-			}
-		]]
+
+			-- {
+			-- 	{name='Kick', remaining=2, miss=false, cooldown=10, texture=[[Interface\Icons\Ability_Kick]]},
+			-- }
+		
 		cooldowns:SetScript('OnUpdate', function()
 			if PAUSE then return end
 			-- update timers
@@ -1226,29 +1289,30 @@ do
 	function addon:HandlePlayerChange()
 		local players = {}
 		local group = false
-		
-		if GetNumRaidMembers() > 0 then
+		local numRaidMembers = GetNumRaidMembers()
+		local numPartyMembers = GetNumPartyMembers()
+		if numRaidMembers > 0 then
 			local name, _, class
-			for i=1, GetNumRaidMembers() do
-				_, class = UnitClass('raid'..i)
-				name = UnitName('raid'..i)
+			for i=1, numRaidMembers do
+				_, class = UnitClass(raid[i])
+				name = UnitName(raid[i])
 				if name and class then
-					players[i] = {name=name,class=strupper(class)}
+					players[i] = {name=name,class=class}
 				end
 			end
 			self.inGroup = true
 			group = 1
-		elseif GetNumPartyMembers() > 0 then
+		elseif numPartyMembers > 0 then
 			local name, _, class
-			for i=1, GetNumPartyMembers() do
-				_, class = UnitClass('party'..i)
-				name = UnitName('party'..i)
+			for i=1, numPartyMembers do
+				_, class = UnitClass(party[i])
+				name = UnitName(party[i])
 				if name and class then
-					players[i] = {name=name,class=strupper(class)}
+					players[i] = {name=name,class=class}
 				end
 			end
 			_, class = UnitClass('player')
-			players[GetNumPartyMembers()+1] = {name=UnitName('player'),class=strupper(class)}
+			players[numPartyMembers+1] = {name=me,class=class}
 			self.inGroup = true
 			group = 2
 		else
@@ -1256,7 +1320,7 @@ do
 		end
 		
 		--[[if getn(self.groupMembers) == getn(players) then
-			self:print('HandlePlayerChange: nothing important has changed', 1)
+			if (debug_level > 0) then self:print('HandlePlayerChange: nothing important has changed', 1) end
 			return
 		end]]
 		
@@ -1275,7 +1339,7 @@ do
 			_inGroup = group
 			if self.inGroup then
 				-- trigger network message when joining a party/raid
-				self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL)
+				self:NetworkSendUpdate(self.Network.Version..';'..self.updateURL, nil, "BULK")
 			end
 		end
 		
@@ -1284,7 +1348,7 @@ do
 			local unsorted = {}
 			
 			for i=1, getn(self.groupMembers) do
-				if self.groupMembers[i].class == 'ROGUE' then
+				if CLASSES[self.groupMembers[i].class] then
 					self.main_frame.trackersCount = self.main_frame.trackersCount + 1
 					track_frame = self:CreateTracker(self.groupMembers[i].name, self.groupMembers[i].class)
 					unsorted[self.main_frame.trackersCount] = track_frame
@@ -1306,7 +1370,7 @@ do
 				return a.text:GetText() < b.text:GetText()
 			end)
 			
-			self:print('adjusting frames position', 1)
+			if (debug_level > 0) then self:print('adjusting frames position', 1) end
 			local point, relativeTo, relativePoint, xOfs, yOfs
 			for i=1, self.main_frame.trackersCount do
 				unsorted[i].button_up:Enable()
@@ -1315,20 +1379,20 @@ do
 				unsorted[i].button_down:Show()
 				point, relativeTo, relativePoint, xOfs, yOfs = unsorted[i]:GetPoint()
 				if i == 1 then
-					self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
+					if (debug_level > 0) then self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1) end
 					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
 					unsorted[i].button_up:Disable()
 				elseif i == self.main_frame.trackersCount then
-					self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount), 1)
+					if (debug_level > 0) then self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount), 1) end
 					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(self.main_frame.trackersCount-1)*BAR_HEIGHT )
 					unsorted[i].button_down:Disable()
 				elseif self.main_frame.trackersCount == 1 then
-					self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
+					if (debug_level > 0) then self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1) end
 					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
 					unsorted[i].button_up:Disable()
 					unsorted[i].button_down:Disable()
 				else
-					self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1)
+					if (debug_level > 0) then self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1) end
 					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(i-1)*BAR_HEIGHT )
 				end
 				
@@ -1342,12 +1406,18 @@ do
 				
 				unsorted[i].sortIndex = i
 				unsorted[i]:Show()
-				self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 1)
+				if (debug_level > 0) then self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 1) end
 			end
 			
 			self:RegisterCombatEvents()
 		else
 			self:UnregisterCombatEvents()
 		end
+		if self.locked and (not self.inGroup) then
+			self.main_frame:Hide()
+		else
+			self.main_frame:Show()
+		end
 	end
 end
+_G.WhoKicksNow = addon
