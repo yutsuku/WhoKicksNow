@@ -525,17 +525,10 @@ end
 do
 	local oncd = {}
 	function addon:SPELL_UPDATE_COOLDOWN() -- lag-independed way to detect kidney shot, hopefully
-<<<<<<< HEAD
-		self:print('SPELL_UPDATE_COOLDOWN', 2)
-		for i=1, getn(SPELLBOOK) do
-			local t, cd = GetSpellCooldown(SPELLBOOK[i].id, "spell")
-			self:print(SPELLBOOK[i].name..' cd '..cd, 2)
-=======
 		if (debug_level > 0) then self:print('SPELL_UPDATE_COOLDOWN', 1) end
 		for i=1, getn(SPELLBOOK) do
 			local t, cd = GetSpellCooldown(SPELLBOOK[i].id, "spell")
 			if (debug_level > 0) then self:print(SPELLBOOK[i].name..' cd '..cd, 2) end
->>>>>>> 8c019268fafd36dff8d627783758794a9e3a5830
 			if cd > 1.5 then
 				if not oncd[SPELLBOOK[i].id] or oncd[SPELLBOOK[i].id] < t then
 				
@@ -598,11 +591,7 @@ function addon:SetHooks()
 			self.UseActionTooltip:SetAction(slot)
 			local spellName = self.UseActionTooltipText:GetText()
 			local skillInfo = self:GetSkillInfo(spellName)
-<<<<<<< HEAD
-			self:print('[UseAction]  '..tostring(spellName), 2)
-=======
 			if (debug_level > 0) then self:print('[UseAction]  '..tostring(spellName), 1) end
->>>>>>> 8c019268fafd36dff8d627783758794a9e3a5830
 			if skillInfo and skillInfo.useHook then
 				if (debug_level > 0) then self:print('[SpellWatcher|Slot] updating '..spellName, 1) end
 				self.SpellWatcher.spells[spellName] = { t = GetTime() }
@@ -1390,17 +1379,6 @@ do
 				unsorted[i].button_down:Show()
 				point, relativeTo, relativePoint, xOfs, yOfs = unsorted[i]:GetPoint()
 				if i == 1 then
-<<<<<<< HEAD
-					self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 2)
-					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
-					unsorted[i].button_up:Disable()
-				elseif i == self.main_frame.trackersCount then
-					self:print(format('[%d] %s is last (of %d)', unsorted[i].sortIndex or -1, unsorted[i].text:GetText(), self.main_frame.trackersCount), 2)
-					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(self.main_frame.trackersCount-1)*BAR_HEIGHT )
-					unsorted[i].button_down:Disable()
-				elseif self.main_frame.trackersCount == 1 then
-					self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 2)
-=======
 					if (debug_level > 0) then self:print(format('[%d] %s is first', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1) end
 					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
 					unsorted[i].button_up:Disable()
@@ -1410,16 +1388,11 @@ do
 					unsorted[i].button_down:Disable()
 				elseif self.main_frame.trackersCount == 1 then
 					if (debug_level > 0) then self:print(format('[%d] %s is alone', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1) end
->>>>>>> 8c019268fafd36dff8d627783758794a9e3a5830
 					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, 0)
 					unsorted[i].button_up:Disable()
 					unsorted[i].button_down:Disable()
 				else
-<<<<<<< HEAD
-					self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 2)
-=======
 					if (debug_level > 0) then self:print(format('[%d] %s', unsorted[i].sortIndex or -1, unsorted[i].text:GetText()), 1) end
->>>>>>> 8c019268fafd36dff8d627783758794a9e3a5830
 					unsorted[i]:SetPoint(point, relativeTo, relativePoint, xOfs, -(i-1)*BAR_HEIGHT )
 				end
 				
@@ -1433,11 +1406,7 @@ do
 				
 				unsorted[i].sortIndex = i
 				unsorted[i]:Show()
-<<<<<<< HEAD
-				self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 2)
-=======
 				if (debug_level > 0) then self:print(format('Showing frame for [%d] %s', unsorted[i].sortIndex, unsorted[i].text:GetText()), 1) end
->>>>>>> 8c019268fafd36dff8d627783758794a9e3a5830
 			end
 			
 			self:RegisterCombatEvents()
